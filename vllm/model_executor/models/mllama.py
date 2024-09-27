@@ -24,20 +24,17 @@ import torch.utils.checkpoint
 import transformers.models.mllama.configuration_mllama as config_mllama
 from PIL import Image
 from torch import nn
-from transformers.modeling_outputs import (BaseModelOutput,
-                                           CausalLMOutputWithPast)
+from transformers.modeling_outputs import CausalLMOutputWithPast
 from transformers.models.mllama.image_processing_mllama import (
     get_optimal_tiled_canvas)
 
-import vllm.distributed.parallel_state as ps
 from vllm.attention import Attention, AttentionMetadata, AttentionType
 from vllm.config import CacheConfig, MultiModalConfig
 from vllm.distributed import get_tensor_model_parallel_world_size
 from vllm.inputs import INPUT_REGISTRY, InputContext, LLMInputs
 from vllm.logger import init_logger
 from vllm.model_executor.layers.layernorm import RMSNorm
-from vllm.model_executor.layers.linear import (ColumnParallelLinear,
-                                               QKVParallelLinear,
+from vllm.model_executor.layers.linear import (QKVParallelLinear,
                                                RowParallelLinear)
 from vllm.model_executor.layers.logits_processor import LogitsProcessor
 from vllm.model_executor.layers.quantization import QuantizationConfig
@@ -49,7 +46,7 @@ from vllm.model_executor.sampling_metadata import SamplingMetadata
 from vllm.multimodal import MULTIMODAL_REGISTRY
 from vllm.sequence import VLLM_TOKEN_ID_ARRAY_TYPE, SequenceData
 
-from .clip import CLIPMLP
+from .clip import CLIPMLPWithoutTensorParallel
 from .interfaces import SupportsMultiModal
 from .llama import LlamaDecoderLayer, LlamaMLP
 
@@ -192,44 +189,6 @@ def _prepare_aspect_ratio_attention_mask(
     return attention_mask
 
 
-class ColumnParallelConv2dPatch(torch.nn.Module):
-    """Conv2D Patching layer with model parallelism.
-    Column parallel over unfolded input.
-    Arguments:
-        in_channels: Input channels.
-        out_channels: Output channels.
-        kernel_size: Size of convolution kernel.
-        stride (default 1): Stride for convolution.
-        bias (default False): Use bias in Conv2d.
-    Input: (bsz, in_channels, width, height)
-    Output: (bsz, num_tokens, out_channels)
-    """
-
-    def __init__(
-        self,
-        in_channels: int,
-        out_channels: int,
-        kernel_size: Union[int, Tuple[int, int]],
-        stride: Union[int, Tuple[int, int]],
-        bias: bool = False,
-    ) -> None:
-        super().__init__()
-        if isinstance(kernel_size, int):
-            kernel_size = (kernel_size, kernel_size)
-        self._unfold = torch.nn.Unfold(kernel_size=kernel_size, stride=stride)
-        self._linear = ColumnParallelLinear(
-            in_channels * kernel_size[0] * kernel_size[1],
-            out_channels,
-            bias=bias,
-        )
-
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        x = self._unfold(x)
-        x = x.permute(0, 2, 1)
-        x, _ = self._linear(x)
-        return x
-
-
 class MllamaPrecomputedAspectRatioEmbedding(nn.Module):
 
     def __init__(self,
@@ -305,25 +264,24 @@ class MllamaVisionSdpaAttention(nn.Module):
     def __init__(self, config: config_mllama.MllamaVisionConfig):
         super().__init__()
 
-        model_parallel_size = get_tensor_model_parallel_world_size()
         self.embed_dim = config.hidden_size
         self.num_heads = config.attention_heads
         self.head_dim = config.hidden_size // config.attention_heads
-        self.num_local_heads = self.num_heads // model_parallel_size
-        self.q_size = self.num_local_heads * self.head_dim
-        self.kv_size = self.num_local_heads * self.head_dim
 
-        self.qkv_proj = QKVParallelLinear(
-            self.embed_dim,
-            self.head_dim,
-            self.num_heads,
-            bias=False,
-        )
-        self.o_proj = RowParallelLinear(
+        self.q_proj = nn.Linear(self.embed_dim,
+                                self.num_heads * self.head_dim,
+                                bias=False)
+        self.k_proj = nn.Linear(self.embed_dim,
+                                self.num_heads * self.head_dim,
+                                bias=False)
+        self.v_proj = nn.Linear(self.embed_dim,
+                                self.num_heads * self.head_dim,
+                                bias=False)
+
+        self.o_proj = nn.Linear(
             self.num_heads * self.head_dim,
             self.embed_dim,
             bias=False,
-            input_is_parallel=True,
         )
 
     def forward(
@@ -331,13 +289,14 @@ class MllamaVisionSdpaAttention(nn.Module):
         hidden_state: torch.Tensor,
         attention_mask: Optional[torch.Tensor] = None,
     ) -> torch.Tensor:
-        qkv, _ = self.qkv_proj(hidden_state)
-        q, k, v = qkv.split([self.q_size, self.kv_size, self.kv_size], dim=-1)
-        q = q.view(q.shape[0], q.shape[1], self.num_local_heads,
+        q = self.q_proj(hidden_state)
+        k = self.k_proj(hidden_state)
+        v = self.v_proj(hidden_state)
+        q = q.view(q.shape[0], q.shape[1], self.num_heads,
                    self.head_dim).transpose(1, 2)
-        k = k.view(k.shape[0], k.shape[1], self.num_local_heads,
+        k = k.view(k.shape[0], k.shape[1], self.num_heads,
                    self.head_dim).transpose(1, 2)
-        v = v.view(v.shape[0], v.shape[1], self.num_local_heads,
+        v = v.view(v.shape[0], v.shape[1], self.num_heads,
                    self.head_dim).transpose(1, 2)
 
         # TODO: remove padding in image encoder
@@ -350,7 +309,7 @@ class MllamaVisionSdpaAttention(nn.Module):
         attn_output = attn_output.transpose(1, 2).contiguous()
         attn_output = attn_output.reshape(attn_output.shape[0],
                                           attn_output.shape[1], -1)
-        output, _ = self.o_proj(attn_output)
+        output = self.o_proj(attn_output)
         return output
 
 
@@ -367,7 +326,7 @@ class MllamaVisionEncoderLayer(nn.Module):
         self.intermediate_size = config.intermediate_size
 
         self.self_attn = MllamaVisionSdpaAttention(config)
-        self.mlp = CLIPMLP(config)
+        self.mlp = CLIPMLPWithoutTensorParallel(config)
 
         self.input_layernorm = nn.LayerNorm(self.hidden_size,
                                             eps=config.norm_eps)
@@ -421,7 +380,7 @@ class MllamaVisionEncoder(nn.Module):
         self,
         hidden_states: torch.Tensor,
         attention_mask: Optional[torch.Tensor] = None,
-    ) -> Union[Tuple, BaseModelOutput]:
+    ) -> Tuple:
         encoder_states = ()
 
         for i, encoder_layer in enumerate(self.layers):
@@ -452,11 +411,12 @@ class MllamaVisionModel(nn.Module):
         self.num_patches = (self.image_size // self.patch_size)**2 + 1
         self.scale = config.hidden_size**-0.5
 
-        self.patch_embedding = ColumnParallelConv2dPatch(
+        self.patch_embedding = nn.Conv2d(
             in_channels=config.num_channels,
             out_channels=self.hidden_size,
             kernel_size=self.patch_size,
             stride=self.patch_size,
+            padding="valid",
             bias=False,
         )
 
@@ -507,8 +467,7 @@ class MllamaVisionModel(nn.Module):
         # patch embedding
         patch_embeds = self.patch_embedding(
             pixel_values.to(self.layernorm_pre.weight.dtype))
-        hidden_state = patch_embeds
-        hidden_state = ps.get_tp_group().all_gather(hidden_state)
+        hidden_state = hidden_state = patch_embeds.flatten(2).transpose(1, 2)
 
         # tile embeddings
         _, num_patches, dim = hidden_state.shape
@@ -598,9 +557,6 @@ class MllamaVisionModel(nn.Module):
 class MllamaTextRMSNorm(nn.Module):
 
     def __init__(self, hidden_size, eps=1e-6):
-        """
-        MllamaTextRMSNorm is equivalent to T5LayerNorm
-        """
         super().__init__()
         self.weight = nn.Parameter(torch.ones(hidden_size))
         self.variance_epsilon = eps
@@ -769,8 +725,6 @@ class MllamaCrossAttentionDecoderLayer(torch.nn.Module):
 
 
 class MllamaTextModel(nn.Module):
-    config_class = config_mllama.MllamaTextConfig
-    base_model_prefix = "model"
 
     def __init__(self, config: config_mllama.MllamaTextConfig,
                  cache_config: Optional[CacheConfig],
@@ -842,11 +796,6 @@ class MllamaTextModel(nn.Module):
 
 
 class MllamaForCausalLM(nn.Module):
-    config_class = config_mllama.MllamaTextConfig
-    base_model_prefix = "language_model"
-    _no_split_modules = [
-        "MllamaCrossAttentionDecoderLayer", "MllamaSelfAttentionDecoderLayer"
-    ]
 
     def __init__(self, config: config_mllama.MllamaTextConfig,
                  cache_config: Optional[CacheConfig],
@@ -1120,21 +1069,16 @@ class MllamaForConditionalGeneration(nn.Module, SupportsMultiModal):
             (".gate_up_proj", ".up_proj", 1),
         ]
         params_dict = dict(self.named_parameters())
-        updated_params = set()
         for name, loaded_weight in weights:
-            if 'patch_embedding.weight' in name:
-                name = name.replace('patch_embedding.weight',
-                                    'patch_embedding._linear.weight')
-                loaded_weight = loaded_weight.view(loaded_weight.shape[0], -1)
             for (param_name, weight_name, shard_id) in stacked_params_mapping:
                 if weight_name not in name:
                     continue
-                name = name.replace(weight_name, param_name)
-                param = params_dict[name]
-                updated_params.add(name)
-                weight_loader = param.weight_loader
-                weight_loader(param, loaded_weight, shard_id)
-                break
+                replaced_name = name.replace(weight_name, param_name)
+                if replaced_name in params_dict:
+                    param = params_dict[replaced_name]
+                    weight_loader = param.weight_loader
+                    weight_loader(param, loaded_weight, shard_id)
+                    break
             else:
                 param = params_dict.pop(name)
                 weight_loader = getattr(param, "weight_loader",

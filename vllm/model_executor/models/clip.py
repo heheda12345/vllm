@@ -282,6 +282,33 @@ class CLIPMLP(nn.Module):
         return hidden_states
 
 
+class CLIPMLPWithoutTensorParallel(nn.Module):
+
+    def __init__(self,
+                 config: CLIPVisionConfig,
+                 quant_config: Optional[QuantizationConfig] = None):
+        super().__init__()
+        self.config = config
+        self.activation_fn = get_act_fn(config.hidden_act)
+        self.fc1 = nn.Linear(
+            config.hidden_size,
+            config.intermediate_size,
+            bias=True,
+        )
+        self.fc2 = nn.Linear(
+            config.intermediate_size,
+            config.hidden_size,
+            bias=True,
+        )
+
+    def forward(self, hidden_states: torch.Tensor) -> torch.Tensor:
+        hidden_states = self.fc1(hidden_states)
+        hidden_states = self.activation_fn(hidden_states)
+        hidden_states = self.fc2(hidden_states)
+
+        return hidden_states
+
+
 class CLIPEncoderLayer(nn.Module):
 
     def __init__(self,
