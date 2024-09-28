@@ -38,7 +38,8 @@ from vllm.logger import init_logger
 from vllm.model_executor.layers.layernorm import RMSNorm
 from vllm.model_executor.layers.linear import (ColumnParallelLinear,
                                                QKVParallelLinear,
-                                               RowParallelLinear)
+                                               RowParallelLinear,
+                                               QCrossKVParallelLinear)
 from vllm.model_executor.layers.logits_processor import LogitsProcessor
 from vllm.model_executor.layers.quantization import QuantizationConfig
 from vllm.model_executor.layers.sampler import Sampler, SamplerOutput
@@ -643,7 +644,8 @@ class MllamaTextCrossAttention(nn.Module):
         self.kv_local_size = self.num_local_key_value_heads * self.head_dim
 
         # TODO: change to Q/KV separate linear after #7448 is merged
-        self.qkv_proj = QKVParallelLinear(
+        self.qkv_proj = QCrossKVParallelLinear(
+        # self.qkv_proj = QKVParallelLinear(
             self.hidden_size,
             self.head_dim,
             self.num_heads,
@@ -679,21 +681,29 @@ class MllamaTextCrossAttention(nn.Module):
         kv_cache: torch.Tensor,
         attn_metadata: AttentionMetadata,
     ) -> torch.Tensor:
-        qkv_dec, _ = self.qkv_proj(hidden_states)
-        q, _, _ = qkv_dec.split(
-            [self.q_local_size, self.kv_local_size, self.kv_local_size],
-            dim=-1)
-        if cross_attention_states is None:
-            k = None
-            v = None
+        q, kv, _, _ = self.qkv_proj(hidden_states, cross_attention_states)
+        if kv is None:
+            k, v = None, None
         else:
-            qkv_enc, _ = self.qkv_proj(cross_attention_states)
-            _, k, v = qkv_enc.split(
-                [self.q_local_size, self.kv_local_size, self.kv_local_size],
-                dim=-1)
+            k, v = kv.split([self.kv_local_size, self.kv_local_size], dim=-1)
             k = k.view(-1, self.num_local_key_value_heads, self.head_dim)
             v = v.view(-1, self.num_local_key_value_heads, self.head_dim)
             k = self.k_norm(k)
+        # qkv_dec, _ = self.qkv_proj(hidden_states)
+        # q, _, _ = qkv_dec.split(
+        #     [self.q_local_size, self.kv_local_size, self.kv_local_size],
+        #     dim=-1)
+        # if cross_attention_states is None:
+        #     k = None
+        #     v = None
+        # else:
+        #     qkv_enc, _ = self.qkv_proj(cross_attention_states)
+        #     _, k, v = qkv_enc.split(
+        #         [self.q_local_size, self.kv_local_size, self.kv_local_size],
+        #         dim=-1)
+        #     k = k.view(-1, self.num_local_key_value_heads, self.head_dim)
+        #     v = v.view(-1, self.num_local_key_value_heads, self.head_dim)
+        #     k = self.k_norm(k)
         q = q.view(-1, self.num_local_heads, self.head_dim)
         q = self.q_norm(q)
 
