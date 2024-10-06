@@ -421,7 +421,7 @@ class LLMEngine:
         # GPU and CPU blocks, which are profiled in the distributed executor.
         self.scheduler = [
             Scheduler(
-                scheduler_config, cache_config, lora_config,
+                scheduler_config, cache_config, lora_config, model_config,
                 parallel_config.pipeline_parallel_size,
                 self.async_callbacks[v_id]
                 if model_config.use_async_output_proc else None)
