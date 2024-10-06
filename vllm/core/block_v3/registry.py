@@ -25,34 +25,35 @@ N = TypeVar("N", bound=Type[nn.Module])
 class BlockTableRegistry:
 
     def __init__(self) -> None:
-        self._block_table_factories_by_model_type: Dict[
+        self._block_manager_factories_by_model_type: Dict[
             Type[nn.Module], BlockTableFactory] = {}
 
-    def register_block_table(self, factory: BlockTableFactory):
+    def register_block_manager(self, factory: BlockTableFactory):
         # TODO: only support block_manager_v3
 
         def wrapper(model_cls: N) -> N:
-            if model_cls in self._block_table_factories_by_model_type:
+            if model_cls in self._block_manager_factories_by_model_type:
                 logger.warning(
                     "Model class %s already has dummy data "
                     "registered to %s. It is overwritten by the new one.",
                     model_cls, self)
 
-            self._block_table_factories_by_model_type[model_cls] = factory
+            self._block_manager_factories_by_model_type[model_cls] = factory
 
             return model_cls
 
         return wrapper
 
-    def add_to_block_manager(self, model_config: "ModelConfig",
-                             custom_manager: "CustomBlockManager") -> None:
+    def add_managers_of_model(self, model_config: "ModelConfig",
+                              custom_manager: "CustomBlockManager") -> None:
         # Avoid circular import
         from vllm.model_executor.model_loader import get_model_architecture
 
         model_cls, _ = get_model_architecture(model_config)
-        custom_block_table_func = self._block_table_factories_by_model_type \
+        custom_block_manager_func = self._block_manager_factories_by_model_type \
            .get(model_cls, self._default_block_table_factory)
-        custom_manager.add_block_tables(custom_block_table_func(model_config))
+        custom_manager.add_app_aware_managers(
+            custom_block_manager_func(model_config))
 
     def _default_block_table_factory(self, model_config: "ModelConfig"):
         """
@@ -63,4 +64,4 @@ class BlockTableRegistry:
             "TODO: Implement default block table factory")
 
 
-BLOCK_TABLE_REGISTRY = BlockTableRegistry()
+BLOCK_MANAGER_REGISTRY = BlockTableRegistry()

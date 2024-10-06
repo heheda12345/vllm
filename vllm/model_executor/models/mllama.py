@@ -48,8 +48,8 @@ from vllm.model_executor.model_loader.weight_utils import default_weight_loader
 from vllm.model_executor.sampling_metadata import SamplingMetadata
 from vllm.multimodal import MULTIMODAL_REGISTRY
 from vllm.sequence import VLLM_TOKEN_ID_ARRAY_TYPE, SequenceData
-from vllm.core.block_v3.registry import BLOCK_TABLE_REGISTRY
-from vllm.core.block_v3.custom_block import CustomBlock, SelfAttentionBlock, EncoderDecoderBlock
+from vllm.core.block_v3.registry import BLOCK_MANAGER_REGISTRY
+from vllm.core.block_v3.custom_block import AppAwareManager, SelfAttentionManager, EncoderDecoderManager
 
 from .clip import CLIPMLP
 from .interfaces import SupportsMultiModal
@@ -194,17 +194,18 @@ def _prepare_aspect_ratio_attention_mask(
     return attention_mask
 
 
-def custom_block_table_for_mllama(
-        model_config: config_mllama.MllamaConfig) -> Dict[int, CustomBlock]:
+def custom_block_manager_for_mllama(
+        model_config: config_mllama.MllamaConfig
+) -> Dict[int, AppAwareManager]:
     cross_attention_layers = model_config.hf_config.\
         text_config.cross_attention_layers
-    custom_block_tables = {}
+    custom_managers = {}
     for i in range(model_config.hf_config.text_config.num_hidden_layers):
         if i in cross_attention_layers:
-            custom_block_tables[i] = EncoderDecoderBlock()
+            custom_managers[i] = EncoderDecoderManager()
         else:
-            custom_block_tables[i] = SelfAttentionBlock()
-    return custom_block_tables
+            custom_managers[i] = SelfAttentionManager()
+    return custom_managers
 
 
 class ColumnParallelConv2dPatch(torch.nn.Module):
@@ -907,7 +908,7 @@ class MllamaForCausalLM(nn.Module):
 @INPUT_REGISTRY.register_dummy_data(dummy_decoder_data_for_mllama)
 @INPUT_REGISTRY.register_dummy_encoder_data(dummy_encoder_data_for_mllama)
 @INPUT_REGISTRY.register_input_processor(input_processor_for_mllama)
-@BLOCK_TABLE_REGISTRY.register_block_table(custom_block_table_for_mllama)
+@BLOCK_MANAGER_REGISTRY.register_block_manager(custom_block_manager_for_mllama)
 class MllamaForConditionalGeneration(nn.Module, SupportsMultiModal):
 
     def __init__(self,

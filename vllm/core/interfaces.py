@@ -2,7 +2,7 @@ import enum
 from abc import ABC, abstractmethod
 from typing import List
 from typing import Sequence as GenericSequence
-from typing import Tuple
+from typing import Tuple, Union, Dict
 
 from vllm.sequence import Sequence, SequenceGroup
 from vllm.utils import Device
@@ -20,6 +20,10 @@ class AllocStatus(enum.Enum):
     OK = enum.auto()
     LATER = enum.auto()
     NEVER = enum.auto()
+
+
+PER_LAYER_BLOCK_IDS = Dict[int, List[int]]
+BLOCK_IDS = Union[List[int], PER_LAYER_BLOCK_IDS]
 
 
 class BlockSpaceManager(ABC):
@@ -96,7 +100,7 @@ class BlockSpaceManager(ABC):
         pass
 
     @abstractmethod
-    def get_block_table(self, seq: Sequence) -> List[int]:
+    def get_block_table(self, seq: Sequence) -> BLOCK_IDS:
         pass
 
     @abstractmethod
