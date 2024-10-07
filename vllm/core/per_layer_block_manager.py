@@ -14,7 +14,7 @@ logger = init_logger(__name__)
 SeqId = int
 
 
-class BlockSpaceManagerV3(BlockSpaceManager):
+class PerlayerBlockSpaceManager(BlockSpaceManager):
 
     def __init__(
         self,
@@ -47,7 +47,7 @@ class BlockSpaceManagerV3(BlockSpaceManager):
 
         self.watermark_blocks = int(watermark * num_gpu_blocks)
         logger.info(
-            "############### create BlockSpaceManagerV3, block_size: {}".
+            "############### create PerlayerBlockSpaceManager, block_size: {}".
             format(block_size))
 
         self.block_tables: Dict[SeqId, CUSTOM_BLOCK_TABLE] = {}
@@ -92,7 +92,7 @@ class BlockSpaceManagerV3(BlockSpaceManager):
         import pdb
         pdb.set_trace()
         raise NotImplementedError(
-            "not implemented: BlockSpaceManagerV3.can_append_slots")
+            "not implemented: PerlayerBlockSpaceManager.can_append_slots")
 
     def append_slots(
         self,
@@ -102,42 +102,44 @@ class BlockSpaceManagerV3(BlockSpaceManager):
         import pdb
         pdb.set_trace()
         raise NotImplementedError(
-            "not implemented: BlockSpaceManagerV3.append_slots")
+            "not implemented: PerlayerBlockSpaceManager.append_slots")
 
     def fork(self, parent_seq: Sequence, child_seq: Sequence) -> None:
         import pdb
         pdb.set_trace()
-        raise NotImplementedError("not implemented: BlockSpaceManagerV3.fork")
+        raise NotImplementedError(
+            "not implemented: PerlayerBlockSpaceManager.fork")
 
     def can_swap_in(self, seq_group: SequenceGroup,
                     num_lookahead_slots: int) -> AllocStatus:
         import pdb
         pdb.set_trace()
         raise NotImplementedError(
-            "not implemented: BlockSpaceManagerV3.can_swap_in")
+            "not implemented: PerlayerBlockSpaceManager.can_swap_in")
 
     def swap_in(self, seq_group: SequenceGroup) -> List[Tuple[int, int]]:
         import pdb
         pdb.set_trace()
         raise NotImplementedError(
-            "not implemented: BlockSpaceManagerV3.swap_in")
+            "not implemented: PerlayerBlockSpaceManager.swap_in")
 
     def can_swap_out(self, seq_group: SequenceGroup) -> bool:
         import pdb
         pdb.set_trace()
         raise NotImplementedError(
-            "not implemented: BlockSpaceManagerV3.can_swap_out")
+            "not implemented: PerlayerBlockSpaceManager.can_swap_out")
 
     def swap_out(self, seq_group: SequenceGroup) -> List[Tuple[int, int]]:
         import pdb
         pdb.set_trace()
         raise NotImplementedError(
-            "not implemented: BlockSpaceManagerV3.swap_out")
+            "not implemented: PerlayerBlockSpaceManager.swap_out")
 
     def free(self, seq: Sequence) -> None:
         import pdb
         pdb.set_trace()
-        raise NotImplementedError("not implemented: BlockSpaceManagerV3.free")
+        raise NotImplementedError(
+            "not implemented: PerlayerBlockSpaceManager.free")
 
     def get_block_table(self, seq: Sequence) -> PER_LAYER_BLOCK_IDS:
         block_tables = self.block_tables[seq.seq_id]
@@ -155,13 +157,15 @@ class BlockSpaceManagerV3(BlockSpaceManager):
         import pdb
         pdb.set_trace()
         raise NotImplementedError(
-            "not implemented: BlockSpaceManagerV3.get_num_free_gpu_blocks")
+            "not implemented: PerlayerBlockSpaceManager.get_num_free_gpu_blocks"
+        )
 
     def get_num_free_cpu_blocks(self) -> int:
         import pdb
         pdb.set_trace()
         raise NotImplementedError(
-            "not implemented: BlockSpaceManagerV3.get_num_free_cpu_blocks")
+            "not implemented: PerlayerBlockSpaceManager.get_num_free_cpu_blocks"
+        )
 
     def access_all_blocks_in_seq(
         self,
@@ -172,7 +176,7 @@ class BlockSpaceManagerV3(BlockSpaceManager):
             import pdb
             pdb.set_trace()
             raise NotImplementedError(
-                "not implemented: BlockSpaceManagerV3.access_all_blocks_in_seq"
+                "not implemented: PerlayerBlockSpaceManager.access_all_blocks_in_seq"
             )
 
     def get_common_computed_block_ids(
@@ -180,7 +184,7 @@ class BlockSpaceManagerV3(BlockSpaceManager):
         import pdb
         pdb.set_trace()
         raise NotImplementedError(
-            "not implemented: BlockSpaceManagerV3.get_common_computed_block_ids"
+            "not implemented: PerlayerBlockSpaceManager.get_common_computed_block_ids"
         )
 
     def mark_blocks_as_computed(self, seq_group: SequenceGroup,
@@ -189,14 +193,16 @@ class BlockSpaceManagerV3(BlockSpaceManager):
             import pdb
             pdb.set_trace()
             raise NotImplementedError(
-                "not implemented: BlockSpaceManagerV3.mark_blocks_as_computed")
+                "not implemented: PerlayerBlockSpaceManager.mark_blocks_as_computed"
+            )
 
     def get_prefix_cache_hit_rate(self, device: Device) -> float:
         """Prefix cache hit rate. -1 means not supported or disabled."""
         import pdb
         pdb.set_trace()
         raise NotImplementedError(
-            "not implemented: BlockSpaceManagerV3.get_prefix_cache_hit_rate")
+            "not implemented: PerlayerBlockSpaceManager.get_prefix_cache_hit_rate"
+        )
 
     # for the compatibility with current Scheduler. Can be removed later
     def get_cross_block_table(self, seq_group: SequenceGroup) -> List[int]:

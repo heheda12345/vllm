@@ -452,7 +452,7 @@ class ModelInputForGPUBuilder(ModelRunnerInputBuilderBase[ModelInputForGPU]):
             ModelInputForGPUBuilder.InterDataForSeqGroup] = []
 
         # Attention metadata inputs.
-        if self.scheduler_config.use_v3_block_manager:
+        if self.scheduler_config.use_per_layer_block_manager:
             self.attn_metadata_builders = {
                 layer_id: self.attn_backend.make_metadata_builder(
                     weakref.proxy(self), layer_id,
@@ -881,7 +881,7 @@ class ModelInputForGPUBuilder(ModelRunnerInputBuilderBase[ModelInputForGPU]):
             seq_lens.extend(itertools.repeat(1, cuda_graph_pad_size))
 
         # Attention metadata.
-        if self.scheduler_config.use_v3_block_manager:
+        if self.scheduler_config.use_per_layer_block_manager:
             # Run per-layer build here
             attn_metadata = {
                 layer_id:
@@ -1073,7 +1073,7 @@ class GPUModelRunnerBase(ModelRunnerBase[TModelInputForGPU]):
               SamplingMetadataCache() \
                 if self.parallel_config.pipeline_parallel_size == 1 else None
 
-        if self.scheduler_config.use_v3_block_manager:
+        if self.scheduler_config.use_per_layer_block_manager:
             self.app_attn_metadata_builders = block_manager_registry \
                 .get_attn_metadata_builder(self.model_config)
             print("attn_metadata_builder", self.app_attn_metadata_builders)

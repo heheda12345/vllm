@@ -145,12 +145,12 @@ class CommonMetadataBuilder(AttentionMetadataBuilder[TAttentionMetadata]):
         self.block_size = input_builder.block_size
         self.use_v2_block_manager = (
             input_builder.scheduler_config.use_v2_block_manager)
-        self.use_v3_block_manager = (
-            input_builder.scheduler_config.use_v3_block_manager)
+        self.use_per_layer_block_manager = (
+            input_builder.scheduler_config.use_per_layer_block_manager)
 
         self.layer_id = layer_id
         self.app_attn_metadata_builder = app_attn_metadata_builder
-        if self.use_v3_block_manager:
+        if self.use_per_layer_block_manager:
             assert self.app_attn_metadata_builder is not None
             assert self.layer_id is not None
 
@@ -183,7 +183,7 @@ class CommonMetadataBuilder(AttentionMetadataBuilder[TAttentionMetadata]):
             # TODO(sang): Combine chunked prefill and prefix caching by
             # only allowing multiple of block_size chunk size.
             # NOTE: This only works for oooooooxxx style attention.
-            if self.use_v3_block_manager:
+            if self.use_per_layer_block_manager:
                 self.block_tables.append(block_tables[seq_id][self.layer_id])
             else:
                 block_table = []
@@ -201,7 +201,7 @@ class CommonMetadataBuilder(AttentionMetadataBuilder[TAttentionMetadata]):
                 is_prompt, query_len, context_len, self.sliding_window,
                 self.use_v2_block_manager)
 
-            if self.use_v3_block_manager:
+            if self.use_per_layer_block_manager:
                 block_table = inter_data.block_tables[seq_id][self.layer_id]
             else:
                 block_table = inter_data.block_tables[seq_id]

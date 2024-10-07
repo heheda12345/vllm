@@ -108,7 +108,7 @@ class EngineArgs:
     enable_prefix_caching: bool = False
     disable_sliding_window: bool = False
     use_v2_block_manager: bool = True
-    use_v3_block_manager: bool = False  # TODO: use cleaner flag after v1 is deprecated
+    use_per_layer_block_manager: bool = False  # TODO: use cleaner flag after v1 is deprecated
     swap_space: float = 4  # GiB
     cpu_offload_gb: float = 0  # GiB
     gpu_memory_utilization: float = 0.90
@@ -380,10 +380,10 @@ class EngineArgs:
             'Set to False to use BlockSpaceManagerV1')
         parser.add_argument(
             '--use-v3-block-manager',
-            default=EngineArgs.use_v3_block_manager,
+            default=EngineArgs.use_per_layer_block_manager,
             action='store_true',
             help='Use BlockSpaceMangerV3. By default this is set to False. '
-            'Set to True to use BlockSpaceManagerV3')
+            'Set to True to use PerlayerBlockSpaceManager')
         parser.add_argument(
             '--num-lookahead-slots',
             type=int,
@@ -1034,7 +1034,7 @@ class EngineArgs:
             max_num_seqs=self.max_num_seqs,
             max_model_len=model_config.max_model_len,
             use_v2_block_manager=self.use_v2_block_manager,
-            use_v3_block_manager=self.use_v3_block_manager,
+            use_per_layer_block_manager=self.use_per_layer_block_manager,
             num_lookahead_slots=num_lookahead_slots,
             delay_factor=self.scheduler_delay_factor,
             enable_chunked_prefill=self.enable_chunked_prefill,

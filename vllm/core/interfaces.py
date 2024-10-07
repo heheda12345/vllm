@@ -41,8 +41,8 @@ class BlockSpaceManager(ABC):
             return BlockSpaceManagerV2
 
         if version == "v3":
-            from vllm.core.block_manager_v3 import BlockSpaceManagerV3
-            return BlockSpaceManagerV3
+            from vllm.core.per_layer_block_manager import PerlayerBlockSpaceManager
+            return PerlayerBlockSpaceManager
 
         if version == "embedding":
             from vllm.core.embedding_model_block_manager import (

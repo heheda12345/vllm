@@ -315,7 +315,7 @@ class Scheduler:
         version = "v1"
         if self.scheduler_config.use_v2_block_manager:
             version = "v2"
-        if self.scheduler_config.use_v3_block_manager:
+        if self.scheduler_config.use_per_layer_block_manager:
             version = "v3"
         if self.scheduler_config.embedding_mode:
             version = "embedding"

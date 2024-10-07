@@ -19,7 +19,7 @@ class AppAwareManager:
                                 num_lookahead_slots: int = 0) -> int:
         # FIXME(heheda12345): When implementing this interface,  we assume that
         # all sequences in the group share the same prompt. This is the same as
-        # BlockSpaceManagerV3
+        # PerlayerBlockSpaceManager
         pass
 
     @abstractmethod

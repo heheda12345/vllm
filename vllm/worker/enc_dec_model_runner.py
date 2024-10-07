@@ -259,7 +259,7 @@ class EncoderDecoderModelRunner(GPUModelRunnerBase[EncoderDecoderModelInput]):
             encoder_input_tokens_tensor,
             encoder_input_positions_tensor,
         ) = self._prepare_encoder_model_input_tensors(seq_group_metadata_list)
-        if self.scheduler_config.use_v3_block_manager:
+        if self.scheduler_config.use_per_layer_block_manager:
             for layer_id, attn_metadata in model_input.attn_metadata.items():
                 if isinstance(self.app_attn_metadata_builders[layer_id],
                               EncoderDecoderManager):
