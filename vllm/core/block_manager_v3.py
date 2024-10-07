@@ -53,7 +53,7 @@ class BlockSpaceManagerV3(BlockSpaceManager):
         self.block_tables: Dict[SeqId, CUSTOM_BLOCK_TABLE] = {}
 
     def add_model(self, model: ModelConfig):
-        self.custom_block_manager.add_block_tables_of_model(model)
+        self.custom_block_manager.add_block_managers_of_model(model)
 
     def can_allocate(self,
                      seq_group: SequenceGroup,

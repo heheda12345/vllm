@@ -14,7 +14,9 @@ import torch
 import torch.distributed
 import torch.nn as nn
 
+from vllm.core.interfaces import BLOCK_IDS
 import vllm.envs as envs
+from vllm.attention import AttentionMetadataBuilder
 from vllm.attention import AttentionMetadata, get_attn_backend
 from vllm.attention.backends.abstract import AttentionState
 from vllm.attention.backends.utils import CommonAttentionState
@@ -22,6 +24,8 @@ from vllm.config import (CacheConfig, DeviceConfig, LoadConfig, LoRAConfig,
                          ModelConfig, ObservabilityConfig, ParallelConfig,
                          PromptAdapterConfig, SchedulerConfig)
 from vllm.core.scheduler import SchedulerOutputs
+from vllm.core.block_v3.registry import BlockManagerRegistry, BLOCK_MANAGER_REGISTRY
+from vllm.core.block_v3.custom_block import AppAwareAttnMetadataBuilder
 from vllm.distributed import get_pp_group
 from vllm.distributed.parallel_state import graph_capture
 from vllm.forward_context import set_forward_context
@@ -205,7 +209,7 @@ class ModelInputForGPUBuilder(ModelRunnerInputBuilderBase[ModelInputForGPU]):
             request_id: str,
             seq_ids: List[int],
             is_prompt: bool,
-            block_tables: Optional[Dict[int, List[int]]],
+            block_tables: Optional[Dict[int, BLOCK_IDS]],
             computed_block_nums: List[int],
             n_seqs: int = 0,
 
@@ -407,9 +411,12 @@ class ModelInputForGPUBuilder(ModelRunnerInputBuilderBase[ModelInputForGPU]):
         for cache in self.runner.inter_data_cache.values():
             cache.reset()
 
-    def __init__(self,
-                 runner: "GPUModelRunnerBase",
-                 finished_requests_ids: Optional[List[str]] = None):
+    def __init__(
+            self,
+            runner: "GPUModelRunnerBase",
+            app_attn_metadata_builders: Dict[int,
+                                             "AppAwareAttnMetadataBuilder"],
+            finished_requests_ids: Optional[List[str]] = None):
         super().__init__()
         # Compute functions for each sequence in a sequence group.
         # WARNING: The order of the functions matters!
@@ -445,8 +452,18 @@ class ModelInputForGPUBuilder(ModelRunnerInputBuilderBase[ModelInputForGPU]):
             ModelInputForGPUBuilder.InterDataForSeqGroup] = []
 
         # Attention metadata inputs.
-        self.attn_metadata_builder = self.attn_backend.make_metadata_builder(
-            weakref.proxy(self))
+        if self.scheduler_config.use_v3_block_manager:
+            self.attn_metadata_builders = {
+                layer_id: self.attn_backend.make_metadata_builder(
+                    weakref.proxy(self), layer_id,
+                    app_attn_metadata_builders[layer_id])
+                for layer_id in app_attn_metadata_builders
+            }
+        else:
+            self.attn_metadata_builders = {
+                0: self.attn_backend.make_metadata_builder(weakref.proxy(self))
+            }
+        self.app_attn_metadata_builders = app_attn_metadata_builders
 
         # Engine/Model configurations.
         self.chunked_prefill_enabled = (
@@ -864,8 +881,18 @@ class ModelInputForGPUBuilder(ModelRunnerInputBuilderBase[ModelInputForGPU]):
             seq_lens.extend(itertools.repeat(1, cuda_graph_pad_size))
 
         # Attention metadata.
-        attn_metadata = self.attn_metadata_builder.build(
-            seq_lens, query_lens, cuda_graph_pad_size, batch_size)
+        if self.scheduler_config.use_v3_block_manager:
+            # Run per-layer build here
+            attn_metadata = {
+                layer_id:
+                attn_metadata_builder.build(seq_lens, query_lens,
+                                            cuda_graph_pad_size, batch_size)
+                for layer_id, attn_metadata_builder in
+                self.attn_metadata_builders.items()
+            }
+        else:
+            attn_metadata = self.attn_metadata_builders[0].build(
+                seq_lens, query_lens, cuda_graph_pad_size, batch_size)
 
         # LoRA data.
         lora_requests = set()
@@ -958,6 +985,7 @@ class GPUModelRunnerBase(ModelRunnerBase[TModelInputForGPU]):
         observability_config: Optional[ObservabilityConfig] = None,
         input_registry: InputRegistry = INPUT_REGISTRY,
         mm_registry: MultiModalRegistry = MULTIMODAL_REGISTRY,
+        block_manager_registry: BlockManagerRegistry = BLOCK_MANAGER_REGISTRY,
     ):
         self.model_config = model_config
         self.parallel_config = parallel_config
@@ -1044,6 +1072,15 @@ class GPUModelRunnerBase(ModelRunnerBase[TModelInputForGPU]):
         self.sampling_metadata_cache: SamplingMetadataCache = \
               SamplingMetadataCache() \
                 if self.parallel_config.pipeline_parallel_size == 1 else None
+
+        if self.scheduler_config.use_v3_block_manager:
+            self.app_attn_metadata_builders = block_manager_registry \
+                .get_attn_metadata_builder(self.model_config)
+            print("attn_metadata_builder", self.app_attn_metadata_builders)
+            assert self.model_config.enforce_eager, (
+                "v3 block manager is not compatible with cuda graph.")
+        else:
+            self.app_attn_metadata_builders = {}
 
     def load_model(self) -> None:
         logger.info("Starting to load model %s...", self.model_config.model)
@@ -1180,7 +1217,9 @@ class GPUModelRunnerBase(ModelRunnerBase[TModelInputForGPU]):
 
         If cuda graph is required, this API automatically pads inputs.
         """
-        builder = self._builder_cls(weakref.proxy(self), finished_requests_ids)
+        builder = self._builder_cls(weakref.proxy(self),
+                                    self.app_attn_metadata_builders,
+                                    finished_requests_ids)
         for seq_group_metadata in seq_group_metadata_list:
             builder.add_seq_group(seq_group_metadata)
 

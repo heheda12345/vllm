@@ -1,16 +1,18 @@
 """Attention backend utils"""
 from contextlib import contextmanager
-from typing import TYPE_CHECKING, Any, Dict, List, Type, TypeVar, Union
+from typing import TYPE_CHECKING, Any, Dict, List, Optional, Type, TypeVar, Union
 
 import numpy as np
 import torch
 
 from vllm.attention import (AttentionMetadata, AttentionMetadataBuilder,
                             AttentionState)
+from vllm.core.interfaces import BLOCK_IDS
 from vllm.utils import async_tensor_h2d, make_tensor_with_pad
 
 if TYPE_CHECKING:
     from vllm.worker.model_runner_base import ModelRunnerBase
+    from vllm.core.block_v3.custom_block import AppAwareAttnMetadataBuilder
 
 # Error string(s) for encoder/decoder
 # unsupported attention scenarios
@@ -80,7 +82,7 @@ def _compute_slot_mapping_numpy(slot_mapping: List[int],
 def compute_slot_mapping(is_profile_run: bool, slot_mapping: List[int],
                          seq_id: int, seq_len: int, context_len: int,
                          start_idx: int, block_size: int,
-                         block_tables: Dict[int, List[int]]):
+                         block_table: List[int]):
     """
     Compute slot mapping.
     """
@@ -104,7 +106,6 @@ def compute_slot_mapping(is_profile_run: bool, slot_mapping: List[int],
     range_start = max(start_idx, context_len)
     range_end = seq_len
     numel = range_end - range_start
-    block_table = block_tables[seq_id]
 
     # numpy implementation will be faster than python if we have
     # many elements, otherwise it will be slower.
@@ -123,11 +124,15 @@ class CommonMetadataBuilder(AttentionMetadataBuilder[TAttentionMetadata]):
 
     _metadata_cls: Type[TAttentionMetadata]
 
-    def __init__(self, input_builder: "ModelInputForGPUBuilder"):
+    def __init__(self,
+                 input_builder: "ModelInputForGPUBuilder",
+                 layer_id: Optional[int] = None,
+                 app_attn_metadata_builder: Optional[
+                     "AppAwareAttnMetadataBuilder"] = None):
         self.slot_mapping: List[int] = []
         self.prefill_seq_lens: List[int] = []
         self.context_lens: List[int] = []
-        self.block_tables: List[List[int]] = []
+        self.block_tables: List[int] = []
         self.curr_seq_lens: List[int] = []
         self.num_prefills = 0
         self.num_prefill_tokens = 0
@@ -140,6 +145,14 @@ class CommonMetadataBuilder(AttentionMetadataBuilder[TAttentionMetadata]):
         self.block_size = input_builder.block_size
         self.use_v2_block_manager = (
             input_builder.scheduler_config.use_v2_block_manager)
+        self.use_v3_block_manager = (
+            input_builder.scheduler_config.use_v3_block_manager)
+
+        self.layer_id = layer_id
+        self.app_attn_metadata_builder = app_attn_metadata_builder
+        if self.use_v3_block_manager:
+            assert self.app_attn_metadata_builder is not None
+            assert self.layer_id is not None
 
     def _add_seq_group(
             self, inter_data: "ModelInputForGPUBuilder.InterDataForSeqGroup",
@@ -170,22 +183,32 @@ class CommonMetadataBuilder(AttentionMetadataBuilder[TAttentionMetadata]):
             # TODO(sang): Combine chunked prefill and prefix caching by
             # only allowing multiple of block_size chunk size.
             # NOTE: This only works for oooooooxxx style attention.
-            block_table = []
-            if inter_data.prefix_cache_hit:
-                block_table = computed_block_nums
-            elif ((chunked_prefill_enabled or not is_prompt)
-                  and block_tables is not None):
-                block_table = block_tables[seq_id][-curr_sliding_window_block:]
-            self.block_tables.append(block_table)
+            if self.use_v3_block_manager:
+                self.block_tables.append(block_tables[seq_id][self.layer_id])
+            else:
+                block_table = []
+                if inter_data.prefix_cache_hit:
+                    block_table = computed_block_nums
+                elif ((chunked_prefill_enabled or not is_prompt)
+                      and block_tables is not None):
+                    block_table = block_tables[seq_id][
+                        -curr_sliding_window_block:]
+                self.block_tables.append(block_table)
 
             # Compute slot mapping.
             is_profile_run = is_block_tables_empty(block_tables)
             start_idx = compute_slot_mapping_start_idx(
                 is_prompt, query_len, context_len, self.sliding_window,
                 self.use_v2_block_manager)
+
+            if self.use_v3_block_manager:
+                block_table = inter_data.block_tables[seq_id][self.layer_id]
+            else:
+                block_table = inter_data.block_tables[seq_id]
+
             compute_slot_mapping(is_profile_run, self.slot_mapping, seq_id,
                                  seq_len, context_len, start_idx,
-                                 self.block_size, inter_data.block_tables)
+                                 self.block_size, block_table)
 
     def build(self, seq_lens: List[int], query_lens: List[int],
               cuda_graph_pad_size: int, batch_size: int):

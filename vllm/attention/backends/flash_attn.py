@@ -361,7 +361,8 @@ class FlashAttentionMetadataBuilder(
                 self.use_v2_block_manager)
             compute_slot_mapping(is_profile_run, self.slot_mapping, seq_id,
                                  seq_len, context_len, start_idx,
-                                 self.block_size, inter_data.block_tables)
+                                 self.block_size,
+                                 inter_data.block_tables[seq_id])
 
     def _get_graph_runner_block_tables(
             self, num_seqs: int,

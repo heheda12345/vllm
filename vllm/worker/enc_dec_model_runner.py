@@ -14,6 +14,9 @@ from vllm.attention.selector import (_Backend, get_env_variable_attn_backend,
 from vllm.config import (CacheConfig, DeviceConfig, LoadConfig, LoRAConfig,
                          ModelConfig, ObservabilityConfig, ParallelConfig,
                          PromptAdapterConfig, SchedulerConfig)
+from vllm.core.block_v3.custom_block import EncoderDecoderManager
+from vllm.core.block_v3.registry import (BlockManagerRegistry,
+                                         BLOCK_MANAGER_REGISTRY)
 from vllm.forward_context import set_forward_context
 from vllm.inputs import INPUT_REGISTRY, InputRegistry
 from vllm.logger import init_logger
@@ -92,6 +95,7 @@ class EncoderDecoderModelRunner(GPUModelRunnerBase[EncoderDecoderModelInput]):
         observability_config: Optional[ObservabilityConfig] = None,
         input_registry: InputRegistry = INPUT_REGISTRY,
         mm_registry: MultiModalRegistry = MULTIMODAL_REGISTRY,
+        block_manager_registry: BlockManagerRegistry = BLOCK_MANAGER_REGISTRY,
     ):
         '''
         EncoderDecoderModelRunner constructor.
@@ -182,10 +186,9 @@ class EncoderDecoderModelRunner(GPUModelRunnerBase[EncoderDecoderModelInput]):
         if num_steps > 1:
             raise ValueError("num_steps > 1 is not supported in "
                              "EncoderDecoderModelRunner")
-
-        if (model_input.attn_metadata is not None
-                and model_input.attn_metadata.prefill_metadata is None
-                and model_input.attn_metadata.decode_metadata.use_cuda_graph):
+        if (not self.model_config.enforce_eager) \
+            and model_input.attn_metadata is not None \
+            and model_input.attn_metadata.prefill_metadata is None:
             assert model_input.input_tokens is not None
             graph_batch_size = model_input.input_tokens.shape[0]
             model_executable = self.graph_runners[
@@ -253,11 +256,19 @@ class EncoderDecoderModelRunner(GPUModelRunnerBase[EncoderDecoderModelInput]):
         model_input = self._prepare_model_input_tensors(
             seq_group_metadata_list, finished_requests_ids)
         (
-            attn_metadata,
             encoder_input_tokens_tensor,
             encoder_input_positions_tensor,
-        ) = (self._prepare_encoder_model_input_tensors(seq_group_metadata_list,
-                                                       model_input))
+        ) = self._prepare_encoder_model_input_tensors(seq_group_metadata_list)
+        if self.scheduler_config.use_v3_block_manager:
+            for layer_id, attn_metadata in model_input.attn_metadata.items():
+                if isinstance(self.app_attn_metadata_builders[layer_id],
+                              EncoderDecoderManager):
+                    self._update_encoder_model_attn_metadata(
+                        attn_metadata, seq_group_metadata_list, layer_id)
+        else:
+            self._update_encoder_model_attn_metadata(model_input.attn_metadata,
+                                                     seq_group_metadata_list,
+                                                     None)
         # Inject attn_metadata encoder/cross-attention fields &
         # encoder input tokens/positions into model_input.
         # Frozen dataclass fields cannot be modified, so use
@@ -265,7 +276,6 @@ class EncoderDecoderModelRunner(GPUModelRunnerBase[EncoderDecoderModelInput]):
         # instance.
         model_input = dataclasses.replace(
             model_input,
-            attn_metadata=attn_metadata,
             encoder_input_tokens=encoder_input_tokens_tensor,
             encoder_input_positions=encoder_input_positions_tensor,
         )
@@ -363,9 +373,53 @@ class EncoderDecoderModelRunner(GPUModelRunnerBase[EncoderDecoderModelInput]):
     def _prepare_encoder_model_input_tensors(
         self,
         seq_group_metadata_list: List[SequenceGroupMetadata],
-        model_input: EncoderDecoderModelInput,
-    ) -> Tuple[AttentionMetadata, Optional[torch.Tensor],
-               Optional[torch.Tensor]]:
+    ) -> Tuple[Optional[torch.Tensor], Optional[torch.Tensor]]:
+
+        if len(seq_group_metadata_list) == 0:
+            return (None, None)
+
+        is_prompt = seq_group_metadata_list[0].is_prompt
+
+        # Build encoder inputs
+        if is_prompt:
+            # Prefill phase.
+            # Extract input tokens/positions from each sequence group metadata
+
+            (
+                encoder_input_tokens,
+                encoder_input_positions,
+            ) = (
+                [],
+                [],
+            )
+            for seq_group_metadata in seq_group_metadata_list:
+                # Build seq lens
+                seq_len = seq_group_metadata.encoder_seq_data.get_len()
+                token_ids = seq_group_metadata.encoder_seq_data.get_token_ids()
+
+                # Build encoder input tokens
+                encoder_input_tokens.extend(token_ids)
+                encoder_input_positions.extend(list(range(0, seq_len)))
+
+            # Convert tokens/positions & cross-attention
+            # slot-mapping to encoder input tensors
+            encoder_input_tokens_tensor = self._list_to_long_tensor(
+                encoder_input_tokens)
+            encoder_input_positions_tensor = self._list_to_long_tensor(
+                encoder_input_positions)
+        else:
+            # Decode phase.
+            encoder_input_tokens_tensor = self._empty_long_tensor()
+            encoder_input_positions_tensor = self._empty_long_tensor()
+
+        return encoder_input_tokens_tensor, encoder_input_positions_tensor
+
+    def _update_encoder_model_attn_metadata(
+        self,
+        attn_metadata: AttentionMetadata,
+        seq_group_metadata_list: List[SequenceGroupMetadata],
+        layer_id: Optional[int],
+    ):
         """Helper method to prepare the encoder- and cross-attn-related
         model inputs based on a given sequence group. These additional inputs
         are used to augment an already-computed `EncoderDecoderModelInput`
@@ -402,7 +456,7 @@ class EncoderDecoderModelRunner(GPUModelRunnerBase[EncoderDecoderModelInput]):
         """
 
         if len(seq_group_metadata_list) == 0:
-            return (model_input.attn_metadata, None, None)
+            return
 
         # Since we are not supporting chunked prefill either the entire
         # batch is prefill or it is decode
@@ -417,20 +471,18 @@ class EncoderDecoderModelRunner(GPUModelRunnerBase[EncoderDecoderModelInput]):
 
             # Extract input tokens/positions, cross-attention slot-mapping,
             # & seq len from each sequence group metadata
-            (
-                encoder_input_tokens,
-                encoder_input_positions,
-                cross_slot_mapping,
-            ) = (
-                [],
-                [],
-                [],
-            )
+            cross_slot_mapping = []
             for seq_group_metadata in seq_group_metadata_list:
                 # Build seq lens
                 seq_len = seq_group_metadata.encoder_seq_data.get_len()
-                token_ids = seq_group_metadata.encoder_seq_data.get_token_ids()
                 encoder_seq_lens.append(seq_len)
+                if layer_id is None:
+                    # using v2_block_manager
+                    cross_block_table = seq_group_metadata.cross_block_table
+                else:
+                    # using v3_block_manager
+                    cross_block_table = seq_group_metadata.block_tables[0][
+                        layer_id]
 
                 # Build slot mapping
                 is_profile_run = (seq_group_metadata.block_tables is None)
@@ -442,29 +494,16 @@ class EncoderDecoderModelRunner(GPUModelRunnerBase[EncoderDecoderModelInput]):
                     cross_slot_mapping.extend([PAD_SLOT_ID] * seq_len)
                 else:
                     for i in range(0, seq_len):
-                        block_number = seq_group_metadata.cross_block_table[
-                            i // self.block_size]
+                        block_number = cross_block_table[i // self.block_size]
                         block_offset = i % self.block_size
                         slot = block_number * self.block_size + block_offset
                         cross_slot_mapping.append(slot)
 
-                # Build encoder input tokens
-                encoder_input_tokens.extend(token_ids)
-                encoder_input_positions.extend(list(range(0, seq_len)))
-
-            # Convert tokens/positions & cross-attention
-            # slot-mapping to encoder input tensors
-            encoder_input_tokens_tensor = self._list_to_long_tensor(
-                encoder_input_tokens)
-            encoder_input_positions_tensor = self._list_to_long_tensor(
-                encoder_input_positions)
             cross_slot_mapping_tensor = self._list_to_long_tensor(
                 cross_slot_mapping)
 
         else:
             # Decode phase.
-            encoder_input_tokens_tensor = self._empty_long_tensor()
-            encoder_input_positions_tensor = self._empty_long_tensor()
             cross_slot_mapping_tensor = self._empty_long_tensor()
             # Extract cross-attention block tables &
             # seq len from each sequence group metadata.
@@ -472,15 +511,20 @@ class EncoderDecoderModelRunner(GPUModelRunnerBase[EncoderDecoderModelInput]):
             # during vLLM memory profiling.
             cross_block_tables = []
             for seq_group_metadata in seq_group_metadata_list:
+                if layer_id is None:
+                    # using v2_block_manager
+                    cross_block_table = seq_group_metadata.cross_block_table
+                else:
+                    # using v3_block_manager
+                    cross_block_table = seq_group_metadata.block_tables[0][
+                        layer_id]
                 for _ in range(len(seq_group_metadata.seq_data)):
                     encoder_seq_lens.append(
                         seq_group_metadata.encoder_seq_data.get_len())
-                    cross_block_table = seq_group_metadata.cross_block_table
                     cross_block_tables.append([] if (
                         cross_block_table is None) else cross_block_table)
 
-            if (model_input.attn_metadata is not None
-                    and model_input.attn_metadata.use_cuda_graph):
+            if attn_metadata.use_cuda_graph:
                 # We will be using CUDA graph replay for this decode.
                 max_len_of_block_table = self.get_max_block_per_batch()
                 batch_size = len(encoder_seq_lens)
@@ -521,8 +565,6 @@ class EncoderDecoderModelRunner(GPUModelRunnerBase[EncoderDecoderModelInput]):
                      out=encoder_seq_start_loc[1:])
 
         # Update attention metadata with encoder-oriented attributes
-        attn_metadata = model_input.attn_metadata
-        assert attn_metadata is not None
         (
             attn_metadata.num_encoder_tokens,
             attn_metadata.encoder_seq_lens,
@@ -538,6 +580,3 @@ class EncoderDecoderModelRunner(GPUModelRunnerBase[EncoderDecoderModelInput]):
             cross_slot_mapping_tensor,
             cross_block_tables,
         )
-
-        return (attn_metadata, encoder_input_tokens_tensor,
-                encoder_input_positions_tensor)

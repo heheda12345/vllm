@@ -29,6 +29,9 @@ class AppAwareManager:
         pass
 
 
+AppAwareAttnMetadataBuilder = AppAwareManager
+
+
 class SelfAttentionManager(AppAwareManager):
 
     def get_num_required_blocks(self,

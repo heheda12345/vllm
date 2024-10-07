@@ -34,7 +34,7 @@ class CustomBlockManager:
         assert managers.keys() & self._app_aware_managers.keys() == set()
         self._app_aware_managers.update(managers)
 
-    def add_block_tables_of_model(self, model: "ModelConfig"):
+    def add_block_managers_of_model(self, model: "ModelConfig"):
         BLOCK_MANAGER_REGISTRY.add_managers_of_model(model, self)
 
     def get_num_required_blocks(self,

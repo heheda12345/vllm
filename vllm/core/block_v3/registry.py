@@ -9,6 +9,7 @@ from vllm.logger import init_logger
 if TYPE_CHECKING:
     from vllm.config import ModelConfig
     from vllm.core.block_v3.custom_block_manager import CustomBlockManager
+    from vllm.core.block_v3.custom_block import AppAwareAttnMetadataBuilder
 
 logger = init_logger(__name__)
 
@@ -22,7 +23,7 @@ class BlockTableFactory(Protocol):
 N = TypeVar("N", bound=Type[nn.Module])
 
 
-class BlockTableRegistry:
+class BlockManagerRegistry:
 
     def __init__(self) -> None:
         self._block_manager_factories_by_model_type: Dict[
@@ -55,6 +56,17 @@ class BlockTableRegistry:
         custom_manager.add_app_aware_managers(
             custom_block_manager_func(model_config))
 
+    def get_attn_metadata_builder(
+        self, model_config: "ModelConfig"
+    ) -> Dict[Any, "AppAwareAttnMetadataBuilder"]:
+        # Avoid circular import
+        from vllm.model_executor.model_loader import get_model_architecture
+
+        model_cls, _ = get_model_architecture(model_config)
+        custom_block_manager_func = self._block_manager_factories_by_model_type \
+           .get(model_cls, self._default_block_table_factory)
+        return custom_block_manager_func(model_config)
+
     def _default_block_table_factory(self, model_config: "ModelConfig"):
         """
         The default block table factory represents the longest possible text
@@ -64,4 +76,4 @@ class BlockTableRegistry:
             "TODO: Implement default block table factory")
 
 
-BLOCK_MANAGER_REGISTRY = BlockTableRegistry()
+BLOCK_MANAGER_REGISTRY = BlockManagerRegistry()
