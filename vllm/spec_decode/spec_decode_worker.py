@@ -4,7 +4,7 @@ from typing import Any, Dict, List, Optional, Set, Tuple, Type
 
 import torch
 
-from vllm.config import ParallelConfig, SpeculativeConfig
+from vllm.config import KVCacheConfig, ParallelConfig, SpeculativeConfig
 from vllm.distributed.communication_op import broadcast_tensor_dict
 from vllm.logger import init_logger
 from vllm.model_executor.layers.rejection_sampler import RejectionSampler
@@ -353,7 +353,8 @@ class SpecDecodeWorker(LoraNotSupportedWorkerBase):
         self.proposer_worker.set_include_gpu_probs_tensor()
         self.proposer_worker.set_should_modify_greedy_probs_inplace()
 
-    def determine_num_available_blocks(self) -> Tuple[int, int]:
+    def determine_num_available_blocks(
+            self, kv_cache_config: Optional[KVCacheConfig]) -> Tuple[int, int]:
         """Determine the number of cache blocks to use.
 
         This is done by profiling the scorer model (which is typically the
@@ -361,8 +362,11 @@ class SpecDecodeWorker(LoraNotSupportedWorkerBase):
         scorer cache is divided evenly between the proposer and scorer model KV,
         such that the number of blocks is equal in both KV caches.
         """
+        if kv_cache_config is not None:
+            raise NotImplementedError("custom kv cache config not supported")
+
         num_gpu_blocks, num_cpu_blocks = (
-            self.scorer_worker.determine_num_available_blocks())
+            self.scorer_worker.determine_num_available_blocks(kv_cache_config))
 
         scorer_cache_block_size_bytes = (
             self.scorer_worker.get_cache_block_size_bytes())

@@ -1,9 +1,9 @@
 from abc import ABC, abstractmethod
 from typing import List, Optional, Set, Tuple
 
-from vllm.config import (CacheConfig, DeviceConfig, LoadConfig, LoRAConfig,
-                         ModelConfig, ObservabilityConfig, ParallelConfig,
-                         PromptAdapterConfig, SchedulerConfig,
+from vllm.config import (CacheConfig, DeviceConfig, KVCacheConfig, LoadConfig,
+                         LoRAConfig, ModelConfig, ObservabilityConfig,
+                         ParallelConfig, PromptAdapterConfig, SchedulerConfig,
                          SpeculativeConfig)
 from vllm.lora.request import LoRARequest
 from vllm.model_executor.layers.sampler import SamplerOutput
@@ -51,7 +51,10 @@ class ExecutorBase(ABC):
         pass
 
     @abstractmethod
-    def determine_num_available_blocks(self) -> Tuple[int, int]:
+    def determine_num_available_blocks(
+            self,
+            kv_cache_config: Optional[KVCacheConfig] = None
+    ) -> Tuple[int, int]:
         """Determine the number of available blocks for the GPU KV cache and
         swappable CPU KV cache.
 

@@ -5,8 +5,8 @@ from typing import Any, Awaitable, List, Optional, Set, Tuple, Union
 import torch
 
 import vllm.envs as envs
-from vllm.config import (CacheConfig, ModelConfig, ParallelConfig,
-                         SchedulerConfig)
+from vllm.config import (CacheConfig, KVCacheConfig, ModelConfig,
+                         ParallelConfig, SchedulerConfig)
 from vllm.executor.executor_base import ExecutorAsyncBase, ExecutorBase
 from vllm.executor.multiproc_worker_utils import (ProcessWorkerWrapper,
                                                   ResultHandler, WorkerMonitor)
@@ -192,12 +192,16 @@ class CPUExecutor(ExecutorBase):
         return [driver_worker_output
                 ] + [output.get() for output in worker_outputs]
 
-    def determine_num_available_blocks(self) -> Tuple[int, int]:
+    def determine_num_available_blocks(
+            self,
+            kv_cache_config: Optional[KVCacheConfig] = None
+    ) -> Tuple[int, int]:
         """Determine the number of available KV blocks by invoking the
         underlying worker.
         """
         return self.driver_method_invoker(self.driver_worker,
-                                          "determine_num_available_blocks")
+                                          "determine_num_available_blocks",
+                                          kv_cache_config)
 
     def initialize_cache(self, num_gpu_blocks: int,
                          num_cpu_blocks: int) -> None:

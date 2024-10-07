@@ -2,6 +2,7 @@ from typing import Any, Dict, List, Optional, Set, Tuple
 
 import torch
 
+from vllm.config import KVCacheConfig
 from vllm.executor.executor_base import ExecutorAsyncBase, ExecutorBase
 from vllm.logger import init_logger
 from vllm.lora.request import LoRARequest
@@ -87,10 +88,14 @@ class TPUExecutor(ExecutorBase):
                     num_cpu_blocks)
         self.driver_worker.initialize_cache(num_gpu_blocks, num_cpu_blocks)
 
-    def determine_num_available_blocks(self) -> Tuple[int, int]:
+    def determine_num_available_blocks(
+            self,
+            kv_cache_config: Optional[KVCacheConfig] = None
+    ) -> Tuple[int, int]:
         """Determine the number of available KV blocks by invoking the
         underlying worker."""
-        return self.driver_worker.determine_num_available_blocks()
+        return self.driver_worker.determine_num_available_blocks(
+            kv_cache_config)
 
     def execute_model(
         self,

@@ -5,6 +5,7 @@ from itertools import islice, repeat
 from typing import (TYPE_CHECKING, Any, Awaitable, Dict, List, Optional, Tuple,
                     Union)
 
+from vllm.config import KVCacheConfig
 import vllm.envs as envs
 from vllm.executor.executor_base import ExecutorAsyncBase
 from vllm.executor.ray_utils import RayWorkerWrapper, ray
@@ -279,8 +280,12 @@ class RayTPUExecutor(TPUExecutor):
         async_run_remote_workers_only to complete."""
         ray.get(parallel_worker_tasks)
 
-    def determine_num_available_blocks(self) -> Tuple[int, int]:
-        num_blocks = self._run_workers("determine_num_available_blocks", )
+    def determine_num_available_blocks(
+            self,
+            kv_cache_config: Optional[KVCacheConfig] = None
+    ) -> Tuple[int, int]:
+        num_blocks = self._run_workers("determine_num_available_blocks",
+                                       kv_cache_config)
         num_tpu_blocks = min(b[0] for b in num_blocks)
         num_cpu_blocks = min(b[1] for b in num_blocks)
         return num_tpu_blocks, num_cpu_blocks

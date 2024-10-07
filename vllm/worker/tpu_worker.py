@@ -6,8 +6,8 @@ import torch_xla.core.xla_model as xm
 import torch_xla.runtime as xr
 
 import vllm.envs as envs
-from vllm.config import (CacheConfig, DeviceConfig, LoadConfig, ModelConfig,
-                         ParallelConfig, SchedulerConfig)
+from vllm.config import (CacheConfig, DeviceConfig, KVCacheConfig, LoadConfig,
+                         ModelConfig, ParallelConfig, SchedulerConfig)
 from vllm.distributed import (ensure_model_parallel_initialized,
                               init_distributed_environment)
 from vllm.logger import init_logger
@@ -110,7 +110,11 @@ class TPUWorker(LoraNotSupportedWorkerBase, LocalOrDistributedWorkerBase):
     def load_model(self):
         self.model_runner.load_model()
 
-    def determine_num_available_blocks(self) -> Tuple[int, int]:
+    def determine_num_available_blocks(
+            self, kv_cache_config: Optional[KVCacheConfig]) -> Tuple[int, int]:
+        if kv_cache_config is not None:
+            raise NotImplementedError("custom kv cache config not supported")
+
         num_layers = self.model_config.get_num_layers(self.parallel_config)
         head_size = self.model_config.get_head_size()
         num_kv_heads = self.model_config.get_num_kv_heads(self.parallel_config)

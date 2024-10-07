@@ -658,6 +658,15 @@ class CacheConfig:
 
 
 @dataclass
+class KVCacheConfig:
+    # This config is built after the initialization of workers
+    # so keep it out of CacheConfig
+
+    block_size_byte: int
+    num_logic_layers: int
+
+
+@dataclass
 class TokenizerPoolConfig:
     """Configuration for the tokenizer pool.
 

@@ -7,7 +7,7 @@ from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Type, Union
 
 import torch
 
-from vllm.config import ObservabilityConfig
+from vllm.config import KVCacheConfig, ObservabilityConfig
 from vllm.distributed import broadcast_tensor_dict, get_pp_group, get_tp_group
 from vllm.logger import init_logger
 from vllm.lora.request import LoRARequest
@@ -37,7 +37,8 @@ class WorkerBase(ABC):
         raise NotImplementedError
 
     @abstractmethod
-    def determine_num_available_blocks(self) -> Tuple[int, int]:
+    def determine_num_available_blocks(
+            self, kv_cache_config: Optional[KVCacheConfig]) -> Tuple[int, int]:
         """Determine the number of available blocks for the GPU KV cache and
         swappable CPU KV cache.
 

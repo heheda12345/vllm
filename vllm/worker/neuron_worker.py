@@ -4,7 +4,7 @@ from typing import List, Optional, Tuple
 import torch
 import torch.distributed
 
-from vllm.config import (CacheConfig, DeviceConfig, ModelConfig,
+from vllm.config import (CacheConfig, DeviceConfig, KVCacheConfig, ModelConfig,
                          ParallelConfig, SchedulerConfig)
 from vllm.distributed import (ensure_model_parallel_initialized,
                               init_distributed_environment)
@@ -56,13 +56,17 @@ class NeuronWorker(LoraNotSupportedWorkerBase, LocalOrDistributedWorkerBase):
     def load_model(self):
         self.model_runner.load_model()
 
-    def determine_num_available_blocks(self) -> Tuple[int, int]:
+    def determine_num_available_blocks(
+            self, kv_cache_config: Optional[KVCacheConfig]) -> Tuple[int, int]:
         """Determine the number of available KV blocks.
 
         Swapping is not yet supported, so always return num_cpu_blocks=0.
 
         We configure num_gpu_blocks to be equal to max_num_seqs.
         """
+        if kv_cache_config is not None:
+            raise NotImplementedError("custom kv cache config not supported")
+
         # Set the number of GPU blocks to be the same as the maximum number of
         # sequences that can be processed in a single batch. This is equivalent
         # to schedule without PagedAttention.

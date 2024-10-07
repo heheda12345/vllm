@@ -7,9 +7,9 @@ import torch
 import torch.distributed
 
 import vllm.envs as envs
-from vllm.config import (CacheConfig, DeviceConfig, LoadConfig, LoRAConfig,
-                         ModelConfig, ObservabilityConfig, ParallelConfig,
-                         PromptAdapterConfig, SchedulerConfig,
+from vllm.config import (CacheConfig, DeviceConfig, KVCacheConfig, LoadConfig,
+                         LoRAConfig, ModelConfig, ObservabilityConfig,
+                         ParallelConfig, PromptAdapterConfig, SchedulerConfig,
                          SpeculativeConfig)
 from vllm.distributed import (ensure_model_parallel_initialized,
                               init_distributed_environment,
@@ -202,7 +202,8 @@ class Worker(LocalOrDistributedWorkerBase):
             tensorizer_config=tensorizer_config, )
 
     @torch.inference_mode()
-    def determine_num_available_blocks(self) -> Tuple[int, int]:
+    def determine_num_available_blocks(
+            self, kv_cache_config: Optional[KVCacheConfig]) -> Tuple[int, int]:
         """Profiles the peak memory usage of the model to determine how many
         KV blocks may be allocated without OOMs.
 
@@ -214,6 +215,9 @@ class Worker(LocalOrDistributedWorkerBase):
             You may limit the usage of GPU memory
             by adjusting the `gpu_memory_utilization` parameter.
         """
+        if kv_cache_config is not None:
+            raise NotImplementedError("custom kv cache config not supported")
+
         # Profile the memory usage of the model and get the maximum number of
         # cache blocks that can be allocated with the remaining free memory.
         torch.cuda.empty_cache()

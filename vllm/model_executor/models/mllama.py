@@ -1082,6 +1082,10 @@ class MllamaForConditionalGeneration(nn.Module, SupportsMultiModal):
         attn_metadata: AttentionMetadata,
         **kwargs: object,
     ) -> Union[Tuple, CausalLMOutputWithPast]:
+        print("attn_metadata", attn_metadata[0])
+        print("attn_metadata_cross", attn_metadata[3])
+        import pdb
+        pdb.set_trace()
         if attn_metadata.num_prefill_tokens > 0 and \
             attn_metadata.num_decode_tokens > 0:
             raise ValueError("Chunk prefill not supported")

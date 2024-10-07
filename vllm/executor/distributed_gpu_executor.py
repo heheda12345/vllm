@@ -2,6 +2,7 @@ import asyncio
 from abc import abstractmethod
 from typing import Any, Awaitable, Dict, List, Optional, Set, Tuple, Union
 
+from vllm.config import KVCacheConfig
 from vllm.executor.executor_base import ExecutorAsyncBase
 from vllm.executor.gpu_executor import GPUExecutor
 from vllm.logger import init_logger
@@ -25,7 +26,10 @@ class DistributedGPUExecutor(GPUExecutor):
 
         super().__init__(*args, **kwargs)
 
-    def determine_num_available_blocks(self) -> Tuple[int, int]:
+    def determine_num_available_blocks(
+            self,
+            kv_cache_config: Optional[KVCacheConfig] = None
+    ) -> Tuple[int, int]:
         """Determine the number of available KV blocks.
 
         This invokes `determine_num_available_blocks` on each worker and takes
@@ -36,7 +40,8 @@ class DistributedGPUExecutor(GPUExecutor):
             - tuple[num_gpu_blocks, num_cpu_blocks]
         """
         # Get the maximum number of blocks that can be allocated on GPU and CPU.
-        num_blocks = self._run_workers("determine_num_available_blocks", )
+        num_blocks = self._run_workers("determine_num_available_blocks",
+                                       kv_cache_config)
 
         # Since we use a shared centralized controller, we take the minimum
         # number of blocks across all workers to make sure all the memory

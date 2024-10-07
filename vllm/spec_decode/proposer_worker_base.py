@@ -1,6 +1,7 @@
 from abc import ABC, abstractmethod
 from typing import List, Optional, Set, Tuple
 
+from vllm.config import KVCacheConfig
 from vllm.model_executor.layers.sampler import SamplerOutput
 from vllm.sequence import ExecuteModelRequest
 from vllm.spec_decode.interfaces import SpeculativeProposer
@@ -44,7 +45,10 @@ class NonLLMProposerWorkerBase(ProposerWorkerBase, ABC):
         """get_spec_proposals is used to get the proposals"""
         return []
 
-    def determine_num_available_blocks(self) -> Tuple[int, int]:
+    def determine_num_available_blocks(
+            self,
+            kv_cache_config: Optional[KVCacheConfig] = None
+    ) -> Tuple[int, int]:
         """This is never called on the proposer, only the target model"""
         raise NotImplementedError
 

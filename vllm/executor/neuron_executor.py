@@ -1,5 +1,6 @@
-from typing import List, Set, Tuple
+from typing import List, Optional, Set, Tuple
 
+from vllm.config import KVCacheConfig
 from vllm.executor.executor_base import ExecutorAsyncBase, ExecutorBase
 from vllm.logger import init_logger
 from vllm.lora.request import LoRARequest
@@ -40,11 +41,15 @@ class NeuronExecutor(ExecutorBase):
         self.driver_worker.init_device()
         self.driver_worker.load_model()
 
-    def determine_num_available_blocks(self) -> Tuple[int, int]:
+    def determine_num_available_blocks(
+            self,
+            kv_cache_config: Optional[KVCacheConfig] = None
+    ) -> Tuple[int, int]:
         """Determine the number of available KV blocks by invoking the
         underlying worker.
         """
-        return self.driver_worker.determine_num_available_blocks()
+        return self.driver_worker.determine_num_available_blocks(
+            kv_cache_config)
 
     def initialize_cache(self, num_gpu_blocks: int,
                          num_cpu_blocks: int) -> None:

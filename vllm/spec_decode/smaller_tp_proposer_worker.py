@@ -2,6 +2,7 @@ from typing import List, Optional, Set, Tuple
 
 import torch
 
+from vllm.config import KVCacheConfig
 from vllm.distributed.parallel_state import (get_tp_group,
                                              init_model_parallel_group,
                                              patch_tensor_parallel_group)
@@ -97,13 +98,17 @@ class SmallerTpProposerWorker(ProposerWorkerBase):
         with self._patch_tensor_parallel_group():
             self._worker.load_model()
 
-    def determine_num_available_blocks(self) -> Tuple[int, int]:
+    def determine_num_available_blocks(
+            self, kv_cache_config: Optional[KVCacheConfig]) -> Tuple[int, int]:
+        if kv_cache_config is not None:
+            raise NotImplementedError("custom kv cache config not supported")
+
         if self._is_dummy:
             # this case is not used now
             return -1, -1
 
         with self._patch_tensor_parallel_group():
-            return self._worker.determine_num_available_blocks()
+            return self._worker.determine_num_available_blocks(kv_cache_config)
 
     def initialize_cache(self, num_gpu_blocks: int,
                          num_cpu_blocks: int) -> None:
