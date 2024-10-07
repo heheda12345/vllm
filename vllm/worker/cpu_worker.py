@@ -245,14 +245,16 @@ class CPUWorker(LoraNotSupportedWorkerBase, LocalOrDistributedWorkerBase):
         num_cpu_blocks = 0
         return num_gpu_blocks, num_cpu_blocks
 
-    def initialize_cache(self, num_gpu_blocks: int,
-                         num_cpu_blocks: int) -> None:
+    def initialize_cache(self, num_gpu_blocks: int, num_cpu_blocks: int,
+                         kv_cache_config: Optional[KVCacheConfig]) -> None:
         """Initialize the KV cache. Currently, swappable CPU memory is not
         supported.
 
         Since this worker does not support GPUs, we use the num_gpu_blocks to
         determine how many non-swappable CPU blocks to allocate.
         """
+        if kv_cache_config is not None:
+            raise NotImplementedError("custom kv cache config not supported")
         assert (num_cpu_blocks == 0
                 ), f"{type(self)} does not support swappable cache"
 

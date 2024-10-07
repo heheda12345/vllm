@@ -105,7 +105,7 @@ class TPUWorker(LoraNotSupportedWorkerBase, LocalOrDistributedWorkerBase):
         rank = xr.global_ordinal()
         per_rank_path = os.path.join(envs.VLLM_XLA_CACHE_PATH,
                                      f"tp{world_size}_rank{rank}")
-        xr.initialize_cache(per_rank_path, readonly=False)
+        xr.initialize_cache(per_rank_path, readonly=False, None)
 
     def load_model(self):
         self.model_runner.load_model()

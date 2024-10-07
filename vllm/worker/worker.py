@@ -215,9 +215,6 @@ class Worker(LocalOrDistributedWorkerBase):
             You may limit the usage of GPU memory
             by adjusting the `gpu_memory_utilization` parameter.
         """
-        if kv_cache_config is not None:
-            raise NotImplementedError("custom kv cache config not supported")
-
         # Profile the memory usage of the model and get the maximum number of
         # cache blocks that can be allocated with the remaining free memory.
         torch.cuda.empty_cache()
@@ -242,8 +239,11 @@ class Worker(LocalOrDistributedWorkerBase):
             f"Initial free memory {self.init_gpu_memory}, current free memory"
             f" {free_gpu_memory}. This happens when the GPU memory was "
             "not properly cleaned up before initializing the vLLM instance.")
-
-        cache_block_size = self.get_cache_block_size_bytes()
+        print("kv_cache_config", kv_cache_config)
+        if kv_cache_config is None:
+            cache_block_size = self.get_cache_block_size_bytes()
+        else:
+            cache_block_size = kv_cache_config.block_size_bytes
         num_gpu_blocks = int(
             (total_gpu_memory * self.cache_config.gpu_memory_utilization -
              peak_memory) // cache_block_size)
@@ -257,8 +257,8 @@ class Worker(LocalOrDistributedWorkerBase):
         torch.cuda.empty_cache()
         return num_gpu_blocks, num_cpu_blocks
 
-    def initialize_cache(self, num_gpu_blocks: int,
-                         num_cpu_blocks: int) -> None:
+    def initialize_cache(self, num_gpu_blocks: int, num_cpu_blocks: int,
+                         kv_cache_config: Optional[KVCacheConfig]) -> None:
         """Allocate GPU and CPU KV cache with the specified number of blocks.
 
         This also warms up the model, which may record CUDA graphs.
@@ -439,12 +439,9 @@ class Worker(LocalOrDistributedWorkerBase):
     def get_cache_block_size_bytes(self) -> int:
         """Get the size of the KV cache block size in bytes.
         """
-        return CacheEngine.get_cache_block_size(
-            self.cache_config,
-            self.model_config,
-            self.parallel_config,
-            use_custom_block_size=self.scheduler_config.
-            use_per_layer_block_manager)
+        return CacheEngine.get_cache_block_size(self.cache_config,
+                                                self.model_config,
+                                                self.parallel_config)
 
 
 def init_worker_distributed_environment(

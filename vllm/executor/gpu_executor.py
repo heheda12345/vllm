@@ -109,6 +109,7 @@ class GPUExecutor(ExecutorBase):
             distributed_init_method=distributed_init_method))
 
     def determine_num_available_blocks(
+            self,
             kv_cache_config: Optional[KVCacheConfig] = None
     ) -> Tuple[int, int]:
         """Determine the number of available KV blocks by invoking the
@@ -117,7 +118,8 @@ class GPUExecutor(ExecutorBase):
         return self.driver_worker.determine_num_available_blocks(
             kv_cache_config)
 
-    def initialize_cache(self, num_gpu_blocks: int, num_cpu_blocks) -> None:
+    def initialize_cache(self, num_gpu_blocks: int, num_cpu_blocks,
+                         kv_cache_config: Optional[KVCacheConfig]) -> None:
         """Initialize the KV cache by invoking the underlying worker.
         """
         # NOTE: This is logged in the executor because there can be >1 worker
@@ -126,7 +128,8 @@ class GPUExecutor(ExecutorBase):
         logger.info("# GPU blocks: %d, # CPU blocks: %d", num_gpu_blocks,
                     num_cpu_blocks)
 
-        self.driver_worker.initialize_cache(num_gpu_blocks, num_cpu_blocks)
+        self.driver_worker.initialize_cache(num_gpu_blocks, num_cpu_blocks,
+                                            kv_cache_config)
 
     def execute_model(
         self, execute_model_req: ExecuteModelRequest

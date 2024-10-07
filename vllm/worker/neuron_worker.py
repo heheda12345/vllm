@@ -77,11 +77,12 @@ class NeuronWorker(LoraNotSupportedWorkerBase, LocalOrDistributedWorkerBase):
 
         return num_gpu_blocks, num_cpu_blocks
 
-    def initialize_cache(self, num_gpu_blocks: int,
-                         num_cpu_blocks: int) -> None:
+    def initialize_cache(self, num_gpu_blocks: int, num_cpu_blocks: int,
+                         kv_cache_config: Optional[KVCacheConfig]) -> None:
         """Initialize the KV cache.
         """
-
+        if kv_cache_config is not None:
+            raise NotImplementedError("custom kv cache config not supported")
         # Different values are not tested.
         assert num_cpu_blocks == 0
         assert num_gpu_blocks == self.scheduler_config.max_num_seqs

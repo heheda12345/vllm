@@ -316,14 +316,16 @@ class OpenVINOWorker(LoraNotSupportedWorkerBase):
 
         return num_device_blocks, num_swap_blocks
 
-    def initialize_cache(self, num_gpu_blocks: int,
-                         num_cpu_blocks: int) -> None:
+    def initialize_cache(self, num_gpu_blocks: int, num_cpu_blocks: int,
+                         kv_cache_config: Optional[KVCacheConfig]) -> None:
         """Initialize the KV cache. Swappable CPU memory is only
         supported on GPU.
 
         For CPU, we use the num_gpu_blocks to
         determine how many non-swappable CPU blocks to allocate.
         """
+        if kv_cache_config is not None:
+            raise NotImplementedError("custom kv cache config not supported")
 
         num_device_blocks = num_gpu_blocks
         num_swap_blocks = num_cpu_blocks

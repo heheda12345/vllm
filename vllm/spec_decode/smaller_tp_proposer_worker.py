@@ -110,13 +110,14 @@ class SmallerTpProposerWorker(ProposerWorkerBase):
         with self._patch_tensor_parallel_group():
             return self._worker.determine_num_available_blocks(kv_cache_config)
 
-    def initialize_cache(self, num_gpu_blocks: int,
-                         num_cpu_blocks: int) -> None:
+    def initialize_cache(self, num_gpu_blocks: int, num_cpu_blocks: int,
+                         kv_cache_config: Optional[KVCacheConfig]) -> None:
         if self._is_dummy:
             return
 
         with self._patch_tensor_parallel_group():
-            self._worker.initialize_cache(num_gpu_blocks, num_cpu_blocks)
+            self._worker.initialize_cache(num_gpu_blocks, num_cpu_blocks,
+                                          kv_cache_config)
 
     def sampler_output(
         self,

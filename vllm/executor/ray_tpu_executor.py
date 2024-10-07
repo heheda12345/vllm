@@ -290,15 +290,16 @@ class RayTPUExecutor(TPUExecutor):
         num_cpu_blocks = min(b[1] for b in num_blocks)
         return num_tpu_blocks, num_cpu_blocks
 
-    def initialize_cache(self, num_gpu_blocks: int,
-                         num_cpu_blocks: int) -> None:
+    def initialize_cache(self, num_gpu_blocks: int, num_cpu_blocks: int,
+                         kv_cache_config: Optional[KVCacheConfig]) -> None:
         logger.info("# TPU blocks: %d, # CPU blocks: %d", num_gpu_blocks,
                     num_cpu_blocks)
         self.cache_config.num_gpu_blocks = num_gpu_blocks
         self.cache_config.num_cpu_blocks = num_cpu_blocks
         self._run_workers("initialize_cache",
                           num_gpu_blocks=num_gpu_blocks,
-                          num_cpu_blocks=num_cpu_blocks)
+                          num_cpu_blocks=num_cpu_blocks,
+                          kv_cache_config=kv_cache_config)
 
     def execute_model(
         self,

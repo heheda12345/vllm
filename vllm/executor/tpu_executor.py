@@ -75,18 +75,16 @@ class TPUExecutor(ExecutorBase):
                 local_rank, rank, distributed_init_method))
             return worker
 
-    def initialize_cache(
-        self,
-        num_gpu_blocks: int,
-        num_cpu_blocks: int,
-    ) -> None:
+    def initialize_cache(self, num_gpu_blocks: int, num_cpu_blocks: int,
+                         kv_cache_config: Optional[KVCacheConfig]) -> None:
         """Initialize the KV cache by invoking the underlying worker."""
         # NOTE: This is logged in the executor because there can be >1 worker
         # with other executors. We could log in the engine level, but work
         # remains to abstract away the device for non-GPU configurations.
         logger.info("# TPU blocks: %d, # CPU blocks: %d", num_gpu_blocks,
                     num_cpu_blocks)
-        self.driver_worker.initialize_cache(num_gpu_blocks, num_cpu_blocks)
+        self.driver_worker.initialize_cache(num_gpu_blocks, num_cpu_blocks,
+                                            kv_cache_config)
 
     def determine_num_available_blocks(
             self,

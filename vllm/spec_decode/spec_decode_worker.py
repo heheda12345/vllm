@@ -378,14 +378,16 @@ class SpecDecodeWorker(LoraNotSupportedWorkerBase):
             num_gpu_blocks)
         return new_num_gpu_blocks, num_cpu_blocks
 
-    def initialize_cache(self, num_gpu_blocks: int,
-                         num_cpu_blocks: int) -> None:
+    def initialize_cache(self, num_gpu_blocks: int, num_cpu_blocks: int,
+                         kv_cache_config: Optional[KVCacheConfig]) -> None:
         """Initialize the cache engine of the scorer and proposer workers.
         """
         self.scorer_worker.initialize_cache(num_gpu_blocks=num_gpu_blocks,
-                                            num_cpu_blocks=num_cpu_blocks)
+                                            num_cpu_blocks=num_cpu_blocks,
+                                            kv_cache_config=kv_cache_config)
         self.proposer_worker.initialize_cache(num_gpu_blocks=num_gpu_blocks,
-                                              num_cpu_blocks=num_cpu_blocks)
+                                              num_cpu_blocks=num_cpu_blocks,
+                                              kv_cache_config=kv_cache_config)
 
     @torch.inference_mode()
     def execute_model(

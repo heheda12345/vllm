@@ -203,8 +203,8 @@ class CPUExecutor(ExecutorBase):
                                           "determine_num_available_blocks",
                                           kv_cache_config)
 
-    def initialize_cache(self, num_gpu_blocks: int,
-                         num_cpu_blocks: int) -> None:
+    def initialize_cache(self, num_gpu_blocks: int, num_cpu_blocks: int,
+                         kv_cache_config: Optional[KVCacheConfig]) -> None:
         """Initialize the KV cache by invoking the underlying worker.
         """
         # NOTE: We log here to avoid multiple logs when number of workers is
@@ -217,7 +217,8 @@ class CPUExecutor(ExecutorBase):
 
         self._run_workers("initialize_cache",
                           num_gpu_blocks=num_gpu_blocks,
-                          num_cpu_blocks=num_cpu_blocks)
+                          num_cpu_blocks=num_cpu_blocks,
+                          kv_cache_config=kv_cache_config)
 
     def execute_model(
             self,

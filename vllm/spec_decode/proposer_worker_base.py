@@ -52,8 +52,8 @@ class NonLLMProposerWorkerBase(ProposerWorkerBase, ABC):
         """This is never called on the proposer, only the target model"""
         raise NotImplementedError
 
-    def initialize_cache(self, num_gpu_blocks: int,
-                         num_cpu_blocks: int) -> None:
+    def initialize_cache(self, num_gpu_blocks: int, num_cpu_blocks: int,
+                         kv_cache_config: Optional[KVCacheConfig]) -> None:
         pass
 
     def get_cache_block_size_bytes(self) -> int:
