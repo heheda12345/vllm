@@ -91,10 +91,14 @@ class PerlayerBlockSpaceManager(BlockSpaceManager):
 
     def can_append_slots(self, seq_group: SequenceGroup,
                          num_lookahead_slots: int) -> bool:
-        import pdb
-        pdb.set_trace()
-        raise NotImplementedError(
-            "not implemented: PerlayerBlockSpaceManager.can_append_slots")
+        num_touched_blocks = 0
+        for seq in seq_group.get_seqs(status=SequenceStatus.RUNNING):
+            block_table = self.block_tables[seq.seq_id]
+            num_touched_blocks += self.custom_block_manager.get_num_blocks_touched_by_append_slots(
+                seq, block_table, num_lookahead_slots)
+        num_free_gpu_blocks = self.global_block_allocator.get_num_free_blocks(
+            Device.GPU)
+        return num_touched_blocks <= num_free_gpu_blocks
 
     def append_slots(
         self,

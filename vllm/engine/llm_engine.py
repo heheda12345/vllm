@@ -1970,8 +1970,7 @@ class LLMEngine:
 
     def get_custom_block_manager(self) -> Optional[CustomBlockManager]:
         if self.scheduler_config.use_per_layer_block_manager:
-            block_manager = CustomBlockManager(self.model_config,
-                                               self.parallel_config,
+            block_manager = CustomBlockManager(self.parallel_config,
                                                self.cache_config)
             block_manager.add_block_managers_of_model(self.model_config)
             block_manager.compile()

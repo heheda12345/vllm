@@ -2,21 +2,20 @@ from abc import abstractmethod
 from typing import Protocol, Dict, Any, Type, TYPE_CHECKING
 from torch import nn
 from typing_extensions import TypeVar
+from vllm.config import CacheConfig, ParallelConfig
 from vllm.core.block.block_table import BlockTable
 from vllm.sequence import Sequence, SequenceGroup
 from vllm.utils import Device, cdiv, chunk_list
 from vllm.logger import init_logger
-if TYPE_CHECKING:
-    from vllm.config import ModelConfig
-    from vllm.core.block_v3.custom_block_manager import CustomBlockManager
-    from vllm.core.block_v3.custom_block import AppAwareAttnMetadataBuilder
+from vllm.config import ModelConfig
+from vllm.core.block_v3.custom_block import AppAwareAttnMetadataBuilder
 
 logger = init_logger(__name__)
 
 
 class BlockTableFactory(Protocol):
 
-    def __call__(self, model_config: "ModelConfig") -> Dict[Any, "BlockTable"]:
+    def __call__(self, model_config: ModelConfig) -> Dict[Any, BlockTable]:
         ...
 
 
@@ -45,29 +44,19 @@ class BlockManagerRegistry:
 
         return wrapper
 
-    def add_managers_of_model(self, model_config: "ModelConfig",
-                              custom_manager: "CustomBlockManager") -> None:
-        # Avoid circular import
-        from vllm.model_executor.model_loader import get_model_architecture
-
-        model_cls, _ = get_model_architecture(model_config)
-        custom_block_manager_func = self._block_manager_factories_by_model_type \
-           .get(model_cls, self._default_block_table_factory)
-        custom_manager.add_app_aware_managers(
-            custom_block_manager_func(model_config))
-
-    def get_attn_metadata_builder(
-        self, model_config: "ModelConfig"
+    def get_managers_of_model(
+        self, model_config: ModelConfig, cache_config: CacheConfig,
+        parallel_config: ParallelConfig
     ) -> Dict[Any, "AppAwareAttnMetadataBuilder"]:
-        # Avoid circular import
         from vllm.model_executor.model_loader import get_model_architecture
 
         model_cls, _ = get_model_architecture(model_config)
         custom_block_manager_func = self._block_manager_factories_by_model_type \
            .get(model_cls, self._default_block_table_factory)
-        return custom_block_manager_func(model_config)
+        return custom_block_manager_func(model_config, cache_config,
+                                         parallel_config)
 
-    def _default_block_table_factory(self, model_config: "ModelConfig"):
+    def _default_block_table_factory(self, model_config: ModelConfig):
         """
         The default block table factory represents the longest possible text
         that can be inputted to the model.

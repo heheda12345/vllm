@@ -31,7 +31,7 @@ from transformers.models.mllama.image_processing_mllama import (
 
 import vllm.distributed.parallel_state as ps
 from vllm.attention import Attention, AttentionMetadata, AttentionType
-from vllm.config import CacheConfig, MultiModalConfig
+from vllm.config import CacheConfig, MultiModalConfig, ParallelConfig
 from vllm.distributed import get_tensor_model_parallel_world_size
 from vllm.inputs import INPUT_REGISTRY, InputContext, LLMInputs
 from vllm.logger import init_logger
@@ -195,16 +195,19 @@ def _prepare_aspect_ratio_attention_mask(
 
 
 def custom_block_manager_for_mllama(
-        model_config: config_mllama.MllamaConfig
-) -> Dict[int, AppAwareManager]:
+        model_config: config_mllama.MllamaConfig, cache_config: CacheConfig,
+        parallel_config: ParallelConfig) -> Dict[int, AppAwareManager]:
     cross_attention_layers = model_config.hf_config.\
         text_config.cross_attention_layers
     custom_managers = {}
     for i in range(model_config.hf_config.text_config.num_hidden_layers):
         if i in cross_attention_layers:
-            custom_managers[i] = EncoderDecoderManager()
+            custom_managers[i] = EncoderDecoderManager(
+                model_config, parallel_config, cache_config.cache_dtype)
         else:
-            custom_managers[i] = SelfAttentionManager()
+            custom_managers[i] = SelfAttentionManager(model_config,
+                                                      parallel_config,
+                                                      cache_config.cache_dtype)
     return custom_managers
 
 
