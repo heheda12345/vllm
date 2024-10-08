@@ -9,6 +9,7 @@ from typing import (Callable, Deque, Dict, Iterable, List, Optional, Set,
 
 from vllm.config import CacheConfig, LoRAConfig, SchedulerConfig, ModelConfig
 from vllm.core.interfaces import AllocStatus, BlockSpaceManager
+from vllm.core.per_layer_block_manager import PerlayerBlockSpaceManager
 from vllm.logger import init_logger
 from vllm.lora.request import LoRARequest
 from vllm.prompt_adapter.request import PromptAdapterRequest
@@ -302,6 +303,7 @@ class Scheduler:
         cache_config: CacheConfig,
         lora_config: Optional[LoRAConfig],
         model_config: ModelConfig,
+        custom_block_manager: Optional[BlockSpaceManager],
         pipeline_parallel_size: int = 1,
         output_proc_callback: Optional[Callable] = None,
     ) -> None:
@@ -332,14 +334,23 @@ class Scheduler:
             num_cpu_blocks //= pipeline_parallel_size
 
         # Create the block space manager.
-        self.block_manager = BlockSpaceManagerImpl(
-            block_size=self.cache_config.block_size,
-            num_gpu_blocks=num_gpu_blocks,
-            num_cpu_blocks=num_cpu_blocks,
-            sliding_window=self.cache_config.sliding_window,
-            enable_caching=self.cache_config.enable_prefix_caching)
         if version == "v3":
-            self.block_manager.add_model(model_config)
+            assert custom_block_manager is not None
+            assert BlockSpaceManagerImpl == PerlayerBlockSpaceManager
+            self.block_manager = PerlayerBlockSpaceManager(
+                block_size=self.cache_config.block_size,
+                num_gpu_blocks=num_gpu_blocks,
+                num_cpu_blocks=num_cpu_blocks,
+                sliding_window=self.cache_config.sliding_window,
+                enable_caching=self.cache_config.enable_prefix_caching,
+                custom_block_manager=custom_block_manager)
+        else:
+            self.block_manager = BlockSpaceManagerImpl(
+                block_size=self.cache_config.block_size,
+                num_gpu_blocks=num_gpu_blocks,
+                num_cpu_blocks=num_cpu_blocks,
+                sliding_window=self.cache_config.sliding_window,
+                enable_caching=self.cache_config.enable_prefix_caching)
 
         # Sequence groups in the WAITING state.
         # Contain new prefill or preempted requests.

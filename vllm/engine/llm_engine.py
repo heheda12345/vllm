@@ -11,10 +11,11 @@ from typing import Set, Type, Union, overload
 import torch
 from typing_extensions import TypeVar
 
+from vllm.core.block_v3.custom_block_manager import CustomBlockManager
 import vllm.envs as envs
 from vllm.config import (CacheConfig, DecodingConfig, DeviceConfig,
-                         EngineConfig, LoadConfig, LoRAConfig, ModelConfig,
-                         ObservabilityConfig, ParallelConfig,
+                         EngineConfig, KVCacheConfig, LoadConfig, LoRAConfig,
+                         ModelConfig, ObservabilityConfig, ParallelConfig,
                          PromptAdapterConfig, SchedulerConfig,
                          SpeculativeConfig)
 from vllm.core.scheduler import (ScheduledSequenceGroup, Scheduler,
@@ -345,8 +346,11 @@ class LLMEngine:
             observability_config=self.observability_config,
         )
 
+        custom_block_manager = self.get_custom_block_manager()
+
         if not self.model_config.embedding_mode:
-            self._initialize_kv_caches()
+            self._initialize_kv_caches(custom_block_manager.kv_cache_config
+                                       if custom_block_manager else None)
 
         # If usage stat is enabled, collect relevant info.
         if is_usage_stats_enabled():
@@ -421,11 +425,15 @@ class LLMEngine:
         # GPU and CPU blocks, which are profiled in the distributed executor.
         self.scheduler = [
             Scheduler(
-                scheduler_config, cache_config, lora_config, model_config,
+                scheduler_config,
+                cache_config,
+                lora_config,
+                model_config,
+                custom_block_manager,
                 parallel_config.pipeline_parallel_size,
                 self.async_callbacks[v_id]
-                if model_config.use_async_output_proc else None)
-            for v_id in range(parallel_config.pipeline_parallel_size)
+                if model_config.use_async_output_proc else None,
+            ) for v_id in range(parallel_config.pipeline_parallel_size)
         ]
 
         # Metric Logging.
@@ -474,14 +482,16 @@ class LLMEngine:
                 ),
             ))
 
-    def _initialize_kv_caches(self) -> None:
+    def _initialize_kv_caches(
+            self, kv_cache_config: Optional[KVCacheConfig]) -> None:
         """Initialize the KV cache in the worker(s).
 
         The workers will determine the number of blocks in both the GPU cache
         and the swap CPU cache.
         """
         num_gpu_blocks, num_cpu_blocks = (
-            self.model_executor.determine_num_available_blocks())
+            self.model_executor.determine_num_available_blocks(
+                kv_cache_config=kv_cache_config))
 
         if self.cache_config.num_gpu_blocks_override is not None:
             num_gpu_blocks_override = self.cache_config.num_gpu_blocks_override
@@ -494,7 +504,8 @@ class LLMEngine:
         self.cache_config.num_gpu_blocks = num_gpu_blocks
         self.cache_config.num_cpu_blocks = num_cpu_blocks
 
-        self.model_executor.initialize_cache(num_gpu_blocks, num_cpu_blocks)
+        self.model_executor.initialize_cache(num_gpu_blocks, num_cpu_blocks,
+                                             kv_cache_config)
 
     @classmethod
     def _get_executor_cls(cls,
@@ -1956,3 +1967,14 @@ class LLMEngine:
                 sampling_params.logits_processors.extend(logits_processors)
 
         return sampling_params
+
+    def get_custom_block_manager(self) -> Optional[CustomBlockManager]:
+        if self.scheduler_config.use_per_layer_block_manager:
+            block_manager = CustomBlockManager(self.model_config,
+                                               self.parallel_config,
+                                               self.cache_config)
+            block_manager.add_block_managers_of_model(self.model_config)
+            block_manager.compile()
+            return block_manager
+        else:
+            return None

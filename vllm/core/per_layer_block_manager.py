@@ -21,6 +21,7 @@ class PerlayerBlockSpaceManager(BlockSpaceManager):
         block_size: int,
         num_gpu_blocks: int,
         num_cpu_blocks: int,
+        custom_block_manager: CustomBlockManager,
         watermark: float = 0.01,
         sliding_window: Optional[int] = None,
         enable_caching: bool = False,
@@ -40,15 +41,17 @@ class PerlayerBlockSpaceManager(BlockSpaceManager):
             block_size=block_size,
         )
 
-        self.custom_block_manager = CustomBlockManager(
-            block_size=block_size, block_allocator=self.global_block_allocator)
+        self.custom_block_manager = custom_block_manager
 
         self.enable_caching = enable_caching
 
         self.watermark_blocks = int(watermark * num_gpu_blocks)
         logger.info(
             "############### create PerlayerBlockSpaceManager, block_size: {}".
-            format(block_size))
+            format(block_size),
+            "page size: {}".format(
+                self.custom_block_manager.kv_cache_config.block_size_bytes),
+        )
 
         self.block_tables: Dict[SeqId, CUSTOM_BLOCK_TABLE] = {}
 
@@ -61,7 +64,6 @@ class PerlayerBlockSpaceManager(BlockSpaceManager):
 
         num_required_blocks = self.custom_block_manager.get_num_required_blocks(
             seq_group,
-            block_size=self.block_size,
             num_lookahead_slots=num_lookahead_slots,
         )
         print("num_required_blocks: ", num_required_blocks)
@@ -81,7 +83,7 @@ class PerlayerBlockSpaceManager(BlockSpaceManager):
         waiting_seqs = seq_group.get_seqs(status=SequenceStatus.WAITING)
 
         block_table: CUSTOM_BLOCK_TABLE = self.custom_block_manager \
-            .allocate_sequence(seq_group)
+            .allocate_sequence(seq_group, self.global_block_allocator)
         self.block_tables[seq_group.seqs[0].seq_id] = block_table
 
         for seq in waiting_seqs[1:]:

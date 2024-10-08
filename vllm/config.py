@@ -662,7 +662,7 @@ class KVCacheConfig:
     # This config is built after the initialization of workers
     # so keep it out of CacheConfig
 
-    block_size_byte: int
+    block_size_bytes: int
     num_logic_layers: int
 
 

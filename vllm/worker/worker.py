@@ -270,15 +270,19 @@ class Worker(LocalOrDistributedWorkerBase):
         self.cache_config.num_gpu_blocks = num_gpu_blocks
         self.cache_config.num_cpu_blocks = num_cpu_blocks
 
-        self._init_cache_engine()
+        self._init_cache_engine(kv_cache_config)
         self._warm_up_model()
 
-    def _init_cache_engine(self):
+    def _init_cache_engine(self, kv_cache_config: Optional[KVCacheConfig]):
         assert self.cache_config.num_gpu_blocks is not None
         self.cache_engine = [
-            CacheEngine(self.cache_config, self.model_config,
-                        self.parallel_config, self.device_config)
-            for _ in range(self.parallel_config.pipeline_parallel_size)
+            CacheEngine(
+                self.cache_config,
+                self.model_config,
+                self.parallel_config,
+                self.device_config,
+                kv_cache_config,
+            ) for _ in range(self.parallel_config.pipeline_parallel_size)
         ]
         self.gpu_cache = [
             self.cache_engine[ve].gpu_cache

@@ -799,20 +799,42 @@ class MllamaTextModel(nn.Module):
         self.cross_attention_layers = config.cross_attention_layers
 
         layers = []
+
+        self.first_decoder_layer_id = -1
+        self.first_cross_attention_layer_id = -1
+
         for layer_idx in range(config.num_hidden_layers):
             if layer_idx in self.cross_attention_layers:
                 layers.append(
                     MllamaCrossAttentionDecoderLayer(
                         config, layer_idx, quant_config=quant_config))
+                if self.first_cross_attention_layer_id == -1:
+                    self.first_cross_attention_layer_id = layer_idx
             else:
                 # TODO: force LlamaDecoderLayer to config.attention_bias=False
                 layers.append(
                     LlamaDecoderLayer(config,
                                       cache_config=cache_config,
                                       quant_config=quant_config))
+                if self.first_decoder_layer_id == -1:
+                    self.first_decoder_layer_id = layer_idx
 
         self.layers = nn.ModuleList(layers)
         self.norm = RMSNorm(config.hidden_size, eps=config.rms_norm_eps)
+
+    def get_decoder_attn_metadata(
+            self, attn_metadata: AttentionMetadata) -> AttentionMetadata:
+        return attn_metadata[self.first_decoder_layer_id]
+
+    def get_cross_attn_metadata(
+            self, attn_metadata: AttentionMetadata) -> AttentionMetadata:
+        return attn_metadata[self.first_cross_attention_layer_id]
+
+    def get_attn_metadata(self, attn_metadata: AttentionMetadata,
+                          layer_id: int) -> AttentionMetadata:
+        if isinstance(attn_metadata, dict):
+            return attn_metadata[layer_id]
+        return attn_metadata
 
     def forward(
         self,
@@ -839,14 +861,15 @@ class MllamaTextModel(nn.Module):
                         full_text_row_masked_out_mask=
                         full_text_row_masked_out_mask,
                         kv_cache=kv_caches[idx],
-                        attn_metadata=attn_metadata,
+                        attn_metadata=self.get_attn_metadata(
+                            attn_metadata, idx),
                     )
             elif isinstance(decoder_layer, LlamaDecoderLayer):
                 hidden_states, residual = decoder_layer(
                     positions=positions,
                     hidden_states=hidden_states,
                     kv_cache=kv_caches[idx],
-                    attn_metadata=attn_metadata,
+                    attn_metadata=attn_metadata[idx],
                     residual=None,
                 )
                 hidden_states = hidden_states + residual
@@ -1074,6 +1097,30 @@ class MllamaForConditionalGeneration(nn.Module, SupportsMultiModal):
 
         return cross_attention_states, full_text_row_masked_out_mask
 
+    def unify_kv_cache_format(
+        self, kv_caches: List[torch.Tensor], attn_metadata: AttentionMetadata
+    ) -> Tuple[List[torch.Tensor], AttentionMetadata]:
+        # Default format:
+        #   kv_caches: a list with num_layers tensors
+        #   attn_metadata: one AttentionMetadata shared by all layers
+        # per-layer kv_caches:
+        #   kv_caches: one tensor for all layers
+        #   attn_metadata: a dict with num_layers AttentionMetadata
+        # this function unifies the format to:
+        #   kv_caches: a list with num_layers tensors
+        #   attn_metadata: a dict with num_layers AttentionMetadata
+        if isinstance(attn_metadata, dict):
+            kv_caches = [
+                kv_caches[0]
+                for _ in range(len(self.language_model.model.layers))
+            ]
+        else:
+            attn_metadata = {
+                i: attn_metadata
+                for i in range(len(self.language_model.model.layers))
+            }
+        return kv_caches, attn_metadata
+
     def forward(
         self,
         input_ids: torch.Tensor,
@@ -1082,21 +1129,29 @@ class MllamaForConditionalGeneration(nn.Module, SupportsMultiModal):
         attn_metadata: AttentionMetadata,
         **kwargs: object,
     ) -> Union[Tuple, CausalLMOutputWithPast]:
-        print("attn_metadata", attn_metadata[0])
-        print("attn_metadata_cross", attn_metadata[3])
-        import pdb
-        pdb.set_trace()
-        if attn_metadata.num_prefill_tokens > 0 and \
-            attn_metadata.num_decode_tokens > 0:
+        # print("attn_metadata", attn_metadata[0])
+        # print("attn_metadata_cross", attn_metadata[3])
+        # import pdb
+        # pdb.set_trace()
+        kv_caches, attn_metadata = self.unify_kv_cache_format(
+            kv_caches, attn_metadata)
+
+        decoder_attn_metadata = self.language_model.model.get_decoder_attn_metadata(
+            attn_metadata)
+        encoder_attn_metadata = self.language_model.model.get_cross_attn_metadata(
+            attn_metadata)
+        if decoder_attn_metadata.num_prefill_tokens > 0 and \
+            decoder_attn_metadata.num_decode_tokens > 0:
             raise ValueError("Chunk prefill not supported")
         image_inputs = self._parse_and_validate_image_input(**kwargs)
         if image_inputs is None:
             cross_attention_mask = None
             full_text_row_masked_out_mask = (
-                attn_metadata.encoder_seq_lens_tensor != 0).reshape(-1, 1).to(
-                    input_ids.device)
+                encoder_attn_metadata.encoder_seq_lens_tensor != 0).reshape(
+                    -1, 1).to(input_ids.device)
             cross_attention_states = None
-            skip_cross_attention = max(attn_metadata.encoder_seq_lens) == 0
+            skip_cross_attention = max(
+                encoder_attn_metadata.encoder_seq_lens) == 0
         else:
             # NOTE: llama's reference implementation runs vision model on CPU
             pixel_values = image_inputs['data']
@@ -1113,7 +1168,7 @@ class MllamaForConditionalGeneration(nn.Module, SupportsMultiModal):
                 bsz, -1, image_token_dim)
 
             cross_attention_states, full_text_row_masked_out_mask = \
-                self.flat_encoder_result(cross_attention_states, attn_metadata)
+                self.flat_encoder_result(cross_attention_states, encoder_attn_metadata)
             skip_cross_attention = False
             # TODO: support multi-image by this mask
             cross_attention_mask = None

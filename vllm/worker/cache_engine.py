@@ -1,10 +1,10 @@
 """CacheEngine class for managing the KV cache."""
-from typing import List
+from typing import List, Optional
 
 import torch
 
 from vllm.attention import get_attn_backend
-from vllm.config import CacheConfig, DeviceConfig, ModelConfig, ParallelConfig
+from vllm.config import CacheConfig, DeviceConfig, KVCacheConfig, ModelConfig, ParallelConfig
 from vllm.logger import init_logger
 from vllm.utils import (STR_DTYPE_TO_TORCH_DTYPE, get_dtype_size,
                         is_pin_memory_available)
@@ -26,6 +26,7 @@ class CacheEngine:
         model_config: ModelConfig,
         parallel_config: ParallelConfig,
         device_config: DeviceConfig,
+        kv_cache_config: Optional[KVCacheConfig],
     ) -> None:
         self.cache_config = cache_config
         self.model_config = model_config
@@ -34,8 +35,11 @@ class CacheEngine:
 
         self.head_size = model_config.get_head_size()
         # Models like Jamba, have mixed typed layers, E.g Mamba
-        self.num_attention_layers = model_config.get_num_attention_layers(
-            parallel_config)
+        if kv_cache_config is not None:
+            self.num_attention_layers = kv_cache_config.num_logic_layers
+        else:
+            self.num_attention_layers = model_config.get_num_attention_layers(
+                parallel_config)
         self.num_kv_heads = model_config.get_num_kv_heads(parallel_config)
 
         self.block_size = cache_config.block_size
