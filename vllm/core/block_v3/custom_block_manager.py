@@ -104,7 +104,6 @@ class CustomBlockManager:
     def allocate_sequence(
             self, seq_group: SequenceGroup,
             allocator: DeviceAwareBlockAllocator) -> CUSTOM_BLOCK_TABLE:
-        assert self._initialized
         block_table: CUSTOM_BLOCK_TABLE = {}
         for layer_id, manager in self._app_aware_managers.items():
             block = manager.allocate_sequence(seq_group, allocator)
@@ -116,7 +115,6 @@ class CustomBlockManager:
     def get_num_blocks_touched_by_append_slots(
             self, seq: Sequence, block_table: CUSTOM_BLOCK_TABLE,
             num_lookahead_slots: int) -> int:
-        assert self._initialized
         total_blocks = 0
         for layer_id, manager in self._app_aware_managers.items():
             assert layer_id in block_table
@@ -124,3 +122,11 @@ class CustomBlockManager:
                 seq, block_table[layer_id], num_lookahead_slots)
             total_blocks += num_blocks
         return total_blocks
+
+    @require_kv_config_init
+    def append_token_ids(self, seq: Sequence, block_table: CUSTOM_BLOCK_TABLE,
+                         num_lookahead_slots: int) -> int:
+        for layer_id, manager in self._app_aware_managers.items():
+            assert layer_id in block_table
+            manager.append_token_ids(seq, block_table[layer_id],
+                                     num_lookahead_slots)

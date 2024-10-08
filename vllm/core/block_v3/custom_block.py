@@ -123,8 +123,10 @@ class SelfAttentionManager(AppAwareManager):
         return block_table
 
     @require_kv_config_init
-    def get_num_blocks_touched_by_append_slots(self, seq, block_table,
-                                               num_lookahead_slots):
+    def get_num_blocks_touched_by_append_slots(self, seq: Sequence,
+                                               block_table: BlockTable,
+                                               num_lookahead_slots: int):
+        assert block_table._block_size == self.block_size
         unseen_token_ids = block_table.get_unseen_token_ids(
             seq.get_token_ids())
 
@@ -133,8 +135,28 @@ class SelfAttentionManager(AppAwareManager):
                                               self.block_size)
         num_token_blocks = (1 + math.ceil(
             (num_token_ids - first_chunk_size) / self.block_size))
-        print("num_token_blocks: ", num_token_blocks)
         return num_token_blocks
+
+    @require_kv_config_init
+    def append_token_ids(self, seq: Sequence, block_table: BlockTable,
+                         num_lookahead_slots: int):
+        assert block_table._block_size == self.block_size
+        unseen_token_ids = block_table.get_unseen_token_ids(
+            seq.get_token_ids())
+
+        block_table.ensure_num_empty_slots(
+            num_empty_slots=len(unseen_token_ids) + num_lookahead_slots)
+
+        # Update the blocks with the new tokens
+        first_block_idx = block_table._num_full_slots // self.block_size
+        token_blocks = block_table._chunk_token_blocks_for_append(
+            unseen_token_ids)
+
+        for i, token_block in enumerate(token_blocks):
+            block_table._blocks.append_token_ids(first_block_idx + i,
+                                                 token_block)
+
+        block_table._num_full_slots += len(unseen_token_ids)
 
 
 class EncoderDecoderManager(AppAwareManager):
@@ -184,4 +206,10 @@ class EncoderDecoderManager(AppAwareManager):
     @require_kv_config_init
     def get_num_blocks_touched_by_append_slots(self, seq, block_table,
                                                num_lookahead_slots):
+        # Encoder-decoder KV cache size is not changed during decoding
         return 0
+
+    @require_kv_config_init
+    def append_token_ids(self, seq, block_table, num_lookahead_slots):
+        # Encoder-decoder KV cache size is not changed during decoding
+        pass

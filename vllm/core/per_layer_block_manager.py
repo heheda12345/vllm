@@ -105,10 +105,11 @@ class PerlayerBlockSpaceManager(BlockSpaceManager):
         seq: Sequence,
         num_lookahead_slots: int,
     ) -> List[Tuple[int, int]]:
-        import pdb
-        pdb.set_trace()
-        raise NotImplementedError(
-            "not implemented: PerlayerBlockSpaceManager.append_slots")
+        block_table = self.block_tables[seq.seq_id]
+        self.custom_block_manager.append_token_ids(seq, block_table,
+                                                   num_lookahead_slots)
+        new_cows = self.global_block_allocator.clear_copy_on_writes()
+        return new_cows
 
     def fork(self, parent_seq: Sequence, child_seq: Sequence) -> None:
         import pdb
