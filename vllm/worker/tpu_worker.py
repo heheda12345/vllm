@@ -162,7 +162,10 @@ class TPUWorker(LoraNotSupportedWorkerBase, LocalOrDistributedWorkerBase):
         self,
         num_gpu_blocks: int,
         num_cpu_blocks: int,
+        kv_cache_config: Optional[KVCacheConfig],
     ) -> None:
+        if kv_cache_config is not None:
+            raise NotImplementedError("custom kv cache config not supported")
         self.cache_config.num_gpu_blocks = num_gpu_blocks
         self.cache_config.num_cpu_blocks = num_cpu_blocks
         self.block_size = self.cache_config.block_size
