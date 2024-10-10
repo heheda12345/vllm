@@ -184,7 +184,17 @@ class CommonMetadataBuilder(AttentionMetadataBuilder[TAttentionMetadata]):
             # only allowing multiple of block_size chunk size.
             # NOTE: This only works for oooooooxxx style attention.
             if self.use_per_layer_block_manager:
-                self.block_tables.append(block_tables[seq_id][self.layer_id])
+                if inter_data.prefix_cache_hit:
+                    raise NotImplementedError
+                elif chunked_prefill_enabled:
+                    raise NotImplementedError
+                elif (not is_prompt and block_tables is not None):
+                    block_table = block_tables[seq_id][self.layer_id]
+                    if curr_sliding_window_block > 0:
+                        raise NotImplementedError
+                else:
+                    block_table = []
+                self.block_tables.append(block_table)
             else:
                 block_table = []
                 if inter_data.prefix_cache_hit:

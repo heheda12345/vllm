@@ -80,7 +80,6 @@ def get_token_size_default(model_config: ModelConfig,
     else:
         dtype = STR_DTYPE_TO_TORCH_DTYPE[cache_dtype]
     dtype_size = get_dtype_size(dtype)
-    print("get_token_size_default: ", dtype_size * total)
     return dtype_size * total
 
 
@@ -199,8 +198,9 @@ class EncoderDecoderManager(AppAwareManager):
             block_allocator=block_allocator,
             max_block_sliding_window=None,
         )
-        block_table.allocate(encoder_seq.get_token_ids())
-
+        encoder_seq_token_ids = encoder_seq.get_token_ids()
+        if encoder_seq_token_ids:
+            block_table.allocate(encoder_seq_token_ids)
         return block_table
 
     @require_kv_config_init

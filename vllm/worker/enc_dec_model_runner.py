@@ -480,8 +480,10 @@ class EncoderDecoderModelRunner(GPUModelRunnerBase[EncoderDecoderModelInput]):
                     # using v2_block_manager
                     cross_block_table = seq_group_metadata.cross_block_table
                 else:
+                    assert len(seq_group_metadata.block_tables) == 1
+                    seq_id =  next(iter(seq_group_metadata.block_tables))
                     # using v3_block_manager
-                    cross_block_table = seq_group_metadata.block_tables[0][
+                    cross_block_table = seq_group_metadata.block_tables[seq_id][
                         layer_id]
 
                 # Build slot mapping
@@ -516,7 +518,9 @@ class EncoderDecoderModelRunner(GPUModelRunnerBase[EncoderDecoderModelInput]):
                     cross_block_table = seq_group_metadata.cross_block_table
                 else:
                     # using v3_block_manager
-                    cross_block_table = seq_group_metadata.block_tables[0][
+                    assert len(seq_group_metadata.block_tables) == 1
+                    seq_id = next(iter(seq_group_metadata.block_tables))
+                    cross_block_table = seq_group_metadata.block_tables[seq_id][
                         layer_id]
                 for _ in range(len(seq_group_metadata.seq_data)):
                     encoder_seq_lens.append(

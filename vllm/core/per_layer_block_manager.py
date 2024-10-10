@@ -47,11 +47,10 @@ class PerlayerBlockSpaceManager(BlockSpaceManager):
 
         self.watermark_blocks = int(watermark * num_gpu_blocks)
         logger.info(
-            "############### create PerlayerBlockSpaceManager, block_size: {}".
-            format(block_size),
-            "page size: {}".format(
-                self.custom_block_manager.kv_cache_config.block_size_bytes),
-        )
+            "############### create PerlayerBlockSpaceManager, block_size: {}, page size: {}"
+            .format(
+                block_size,
+                self.custom_block_manager.kv_cache_config.block_size_bytes), )
 
         self.block_tables: Dict[SeqId, CUSTOM_BLOCK_TABLE] = {}
 
@@ -143,10 +142,16 @@ class PerlayerBlockSpaceManager(BlockSpaceManager):
             "not implemented: PerlayerBlockSpaceManager.swap_out")
 
     def free(self, seq: Sequence) -> None:
-        import pdb
-        pdb.set_trace()
-        raise NotImplementedError(
-            "not implemented: PerlayerBlockSpaceManager.free")
+        seq_id = seq.seq_id
+
+        if seq_id not in self.block_tables:
+            # Already freed or haven't been scheduled yet.
+            return
+
+        # Free table/blocks
+        for block in self.block_tables[seq_id].values():
+            block.free()
+        del self.block_tables[seq_id]
 
     def get_block_table(self, seq: Sequence) -> PER_LAYER_BLOCK_IDS:
         block_tables = self.block_tables[seq.seq_id]
@@ -154,10 +159,10 @@ class PerlayerBlockSpaceManager(BlockSpaceManager):
             block_id: block_tables[block_id].physical_block_ids
             for block_id in block_tables
         }
-        print("[[[block_ids: ]]]")
-        for layer_id in block_ids:
-            print(f"layer: {layer_id}, block_ids: {block_ids[layer_id]}")
-            if layer_id == 3: break
+        # print("[[[block_ids: ]]]")
+        # for layer_id in block_ids:
+        #     print(f"layer: {layer_id}, block_ids: {block_ids[layer_id]}")
+        #     if layer_id == 3: break
         return block_ids
 
     def get_num_free_gpu_blocks(self) -> int:
@@ -214,3 +219,7 @@ class PerlayerBlockSpaceManager(BlockSpaceManager):
     # for the compatibility with current Scheduler. Can be removed later
     def get_cross_block_table(self, seq_group: SequenceGroup) -> List[int]:
         return []
+
+    # for the compatibility with current Scheduler. Can be removed later
+    def free_cross(self, seq_group: SequenceGroup) -> None:
+        pass

@@ -1078,7 +1078,6 @@ class GPUModelRunnerBase(ModelRunnerBase[TModelInputForGPU]):
         if self.scheduler_config.use_per_layer_block_manager:
             self.app_attn_metadata_builders = block_manager_registry \
                 .get_managers_of_model(self.model_config, self.cache_config, self.parallel_config)
-            print("attn_metadata_builder", self.app_attn_metadata_builders)
             assert self.model_config.enforce_eager, (
                 "v3 block manager is not compatible with cuda graph.")
         else:

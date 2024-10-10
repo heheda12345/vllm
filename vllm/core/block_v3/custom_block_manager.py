@@ -96,7 +96,6 @@ class CustomBlockManager:
         for id, manager in self._app_aware_managers.items():
             num_blocks = manager.get_num_required_blocks(
                 seq_group, num_lookahead_slots)
-            print(f"block id: {id}, num_blocks: {num_blocks}")
             total_blocks += num_blocks
         return total_blocks
 
