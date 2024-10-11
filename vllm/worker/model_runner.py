@@ -454,7 +454,8 @@ class ModelInputForGPUBuilder(ModelRunnerInputBuilderBase[ModelInputForGPU]):
         # Attention metadata inputs.
         if self.scheduler_config.use_per_layer_block_manager:
             self.attn_metadata_builders = {
-                layer_id: self.attn_backend.make_metadata_builder(
+                layer_id:
+                self.attn_backend.make_metadata_builder(
                     weakref.proxy(self), layer_id,
                     app_attn_metadata_builders[layer_id])
                 for layer_id in app_attn_metadata_builders
@@ -893,8 +894,17 @@ class ModelInputForGPUBuilder(ModelRunnerInputBuilderBase[ModelInputForGPU]):
                 self.attn_metadata_builders.items()
             }
         else:
-            attn_metadata = self.attn_metadata_builders[0].build(
+            unified_attn_metadata = self.attn_metadata_builders[0].build(
                 seq_lens, query_lens, cuda_graph_pad_size, batch_size)
+            if self.runner.use_per_layer_attn_metadata:
+                attn_metadata = {
+                    i: unified_attn_metadata
+                    for i in range(
+                        self.runner.model_config.get_num_layers(
+                            self.runner.parallel_config))
+                }
+            else:
+                attn_metadata = unified_attn_metadata
 
         # LoRA data.
         lora_requests = set()
@@ -1075,6 +1085,8 @@ class GPUModelRunnerBase(ModelRunnerBase[TModelInputForGPU]):
               SamplingMetadataCache() \
                 if self.parallel_config.pipeline_parallel_size == 1 else None
 
+        self.use_per_layer_attn_metadata = block_manager_registry.support_model(
+            self.model_config)
         if self.scheduler_config.use_per_layer_block_manager:
             self.app_attn_metadata_builders = block_manager_registry \
                 .get_managers_of_model(self.model_config, self.cache_config, self.parallel_config)
@@ -1656,18 +1668,21 @@ class ModelRunner(GPUModelRunnerBase[ModelInputForGPUWithSamplingMetadata]):
 
         self.attn_state.begin_forward(model_input)
 
-        # Currently cuda graph is only supported by the decode phase.
-        assert model_input.attn_metadata is not None
-        prefill_meta = model_input.attn_metadata.prefill_metadata
-        decode_meta = model_input.attn_metadata.decode_metadata
-        # TODO(andoorve): We can remove this once all
-        # virtual engines share the same kv cache.
-        virtual_engine = model_input.virtual_engine
-        if prefill_meta is None and decode_meta.use_cuda_graph:
-            assert model_input.input_tokens is not None
-            graph_batch_size = model_input.input_tokens.shape[0]
-            model_executable = self.graph_runners[virtual_engine][
-                graph_batch_size]
+        if not self.model_config.enforce_eager:
+            # Currently cuda graph is only supported by the decode phase.
+            assert model_input.attn_metadata is not None
+            prefill_meta = model_input.attn_metadata.prefill_metadata
+            decode_meta = model_input.attn_metadata.decode_metadata
+            # TODO(andoorve): We can remove this once all
+            # virtual engines share the same kv cache.
+            virtual_engine = model_input.virtual_engine
+            if prefill_meta is None and decode_meta.use_cuda_graph:
+                assert model_input.input_tokens is not None
+                graph_batch_size = model_input.input_tokens.shape[0]
+                model_executable = self.graph_runners[virtual_engine][
+                    graph_batch_size]
+            else:
+                model_executable = self.model
         else:
             model_executable = self.model
 
@@ -1681,6 +1696,12 @@ class ModelRunner(GPUModelRunnerBase[ModelInputForGPUWithSamplingMetadata]):
             model_forward_start = torch.cuda.Event(enable_timing=True)
             model_forward_end = torch.cuda.Event(enable_timing=True)
             model_forward_start.record()
+
+        if self.scheduler_config.use_per_layer_block_manager:
+            kv_caches = [
+                kv_caches[0] for _layer_id in range(
+                    self.model_config.get_num_layers(self.parallel_config))
+            ]
 
         with set_forward_context(model_input.attn_metadata):
             hidden_or_intermediate_states = model_executable(

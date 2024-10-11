@@ -19,6 +19,7 @@ from vllm.utils import async_tensor_h2d, make_tensor_with_pad
 if TYPE_CHECKING:
     from vllm.worker.model_runner import (ModelInputForGPUBuilder,
                                           ModelInputForGPUWithSamplingMetadata)
+    from vllm.core.block_v3.custom_block import AppAwareAttnMetadataBuilder
 
 from vllm.vllm_flash_attn import (flash_attn_varlen_func,
                                   flash_attn_with_kvcache)
@@ -291,7 +292,11 @@ class FlashAttentionMetadata(AttentionMetadata):
 class FlashAttentionMetadataBuilder(
         AttentionMetadataBuilder[FlashAttentionMetadata]):
 
-    def __init__(self, input_builder: "ModelInputForGPUBuilder"):
+    def __init__(self,
+                 input_builder: "ModelInputForGPUBuilder",
+                 layer_id: Optional[int] = None,
+                 app_attn_metadata_builder: Optional[
+                     "AppAwareAttnMetadataBuilder"] = None):
         self.slot_mapping: List[int] = []
         self.prefill_seq_lens: List[int] = []
         self.context_lens: List[int] = []
@@ -308,6 +313,15 @@ class FlashAttentionMetadataBuilder(
         self.block_size = input_builder.block_size
         self.use_v2_block_manager = (
             input_builder.scheduler_config.use_v2_block_manager)
+
+        self.use_per_layer_block_manager = (
+            input_builder.scheduler_config.use_per_layer_block_manager)
+
+        self.layer_id = layer_id
+        self.app_attn_metadata_builder = app_attn_metadata_builder
+        if self.use_per_layer_block_manager:
+            assert self.app_attn_metadata_builder is not None
+            assert self.layer_id is not None
 
     def _add_seq_group(
             self, inter_data: "ModelInputForGPUBuilder.InterDataForSeqGroup",
@@ -341,28 +355,44 @@ class FlashAttentionMetadataBuilder(
             # only allowing multiple of block_size chunk size.
             # NOTE: This only works for oooooooxxx style attention.
             block_table = []
-            if prefix_cache_hit:
-                # NOTE(woosuk): For flash-attn, the block table should
-                # include the entries for the incoming prefill tokens.
-                block_table = block_tables[seq_id]
-            elif ((chunked_prefill_enabled or not is_prompt)
-                  and block_tables is not None):
-                if curr_sliding_window_block == 0:
+            if self.use_per_layer_block_manager:
+                if prefix_cache_hit:
+                    raise NotImplementedError
+                elif chunked_prefill_enabled:
+                    raise NotImplementedError
+                elif (not is_prompt and block_tables is not None):
+                    block_table = block_tables[seq_id][self.layer_id]
+                    if curr_sliding_window_block > 0:
+                        raise NotImplementedError
+                self.block_tables.append(block_table)
+            else:
+                if prefix_cache_hit:
+                    # NOTE(woosuk): For flash-attn, the block table should
+                    # include the entries for the incoming prefill tokens.
                     block_table = block_tables[seq_id]
-                else:
-                    block_table = block_tables[seq_id][
-                        -curr_sliding_window_block:]
-            self.block_tables.append(block_table)
+                elif ((chunked_prefill_enabled or not is_prompt)
+                      and block_tables is not None):
+                    if curr_sliding_window_block == 0:
+                        block_table = block_tables[seq_id]
+                    else:
+                        block_table = block_tables[seq_id][
+                            -curr_sliding_window_block:]
+                self.block_tables.append(block_table)
 
             # Compute slot mapping.
             is_profile_run = is_block_tables_empty(block_tables)
             start_idx = compute_slot_mapping_start_idx(
                 is_prompt, query_len, context_len, self.sliding_window,
                 self.use_v2_block_manager)
+
+            if self.use_per_layer_block_manager:
+                block_table = inter_data.block_tables[seq_id][self.layer_id]
+            else:
+                block_table = inter_data.block_tables[seq_id]
+
             compute_slot_mapping(is_profile_run, self.slot_mapping, seq_id,
                                  seq_len, context_len, start_idx,
-                                 self.block_size,
-                                 inter_data.block_tables[seq_id])
+                                 self.block_size, block_table)
 
     def _get_graph_runner_block_tables(
             self, num_seqs: int,
@@ -561,6 +591,7 @@ class FlashAttentionImpl(AttentionImpl):
         k_scale: float = 1.0,
         v_scale: float = 1.0,
         attn_type: AttentionType = AttentionType.DECODER,
+        layer_id: Optional[int] = None,
     ) -> torch.Tensor:
         """Forward pass with FlashAttention.
 
@@ -600,6 +631,7 @@ class FlashAttentionImpl(AttentionImpl):
             self.sliding_window,
             self.alibi_slopes,
             self.logits_soft_cap,
+            layer_id,
         )
 
         return output
@@ -622,10 +654,15 @@ def unified_flash_attention(
     window_size: Optional[List[int]] = None,
     alibi_slopes: Optional[torch.Tensor] = None,
     logits_soft_cap: Optional[float] = None,
+    layer_id: Optional[int] = None,
 ) -> torch.Tensor:
 
-    current_metadata = get_forward_context()
-    assert current_metadata is not None
+    current_metadata_ctx = get_forward_context()
+    assert current_metadata_ctx is not None
+    if layer_id is not None:
+        current_metadata = current_metadata_ctx[layer_id]
+    else:
+        current_metadata = current_metadata_ctx
     assert isinstance(current_metadata, FlashAttentionMetadata)
     attn_metadata: FlashAttentionMetadata = current_metadata
 

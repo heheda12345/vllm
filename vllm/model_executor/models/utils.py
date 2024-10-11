@@ -8,6 +8,7 @@ import torch.nn as nn
 from torch.func import functional_call
 from transformers import PretrainedConfig
 
+from vllm.attention.backends.abstract import AttentionMetadata
 from vllm.config import (CacheConfig, LoRAConfig, MultiModalConfig,
                          SchedulerConfig)
 from vllm.model_executor.layers.quantization import QuantizationConfig
@@ -322,9 +323,8 @@ def make_empty_intermediate_tensors_factory(keys: List[str], hidden_size: int):
         device: torch.device,
     ) -> IntermediateTensors:
         return IntermediateTensors({
-            key: torch.zeros((batch_size, hidden_size),
-                             dtype=dtype,
-                             device=device)
+            key:
+            torch.zeros((batch_size, hidden_size), dtype=dtype, device=device)
             for key in keys
         })
 

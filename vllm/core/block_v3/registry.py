@@ -64,5 +64,11 @@ class BlockManagerRegistry:
         raise NotImplementedError(
             "TODO: Implement default block table factory")
 
+    def support_model(self, model_config: ModelConfig) -> bool:
+        from vllm.model_executor.model_loader import get_model_architecture
+
+        model_cls, _ = get_model_architecture(model_config)
+        return model_cls in self._block_manager_factories_by_model_type
+
 
 BLOCK_MANAGER_REGISTRY = BlockManagerRegistry()

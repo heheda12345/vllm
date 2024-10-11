@@ -228,5 +228,6 @@ class AttentionImpl(ABC, Generic[T]):
         k_scale: float = 1.0,
         v_scale: float = 1.0,
         attn_type: AttentionType = AttentionType.DECODER,
+        layer_id: Optional[int] = None,
     ) -> torch.Tensor:
         raise NotImplementedError

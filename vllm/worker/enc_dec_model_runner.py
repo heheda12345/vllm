@@ -95,7 +95,6 @@ class EncoderDecoderModelRunner(GPUModelRunnerBase[EncoderDecoderModelInput]):
         observability_config: Optional[ObservabilityConfig] = None,
         input_registry: InputRegistry = INPUT_REGISTRY,
         mm_registry: MultiModalRegistry = MULTIMODAL_REGISTRY,
-        block_manager_registry: BlockManagerRegistry = BLOCK_MANAGER_REGISTRY,
     ):
         '''
         EncoderDecoderModelRunner constructor.
@@ -201,6 +200,12 @@ class EncoderDecoderModelRunner(GPUModelRunnerBase[EncoderDecoderModelInput]):
             "request_ids_to_seq_ids": model_input.request_ids_to_seq_ids,
         } if self.has_seqlen_agnostic else {}
 
+        if self.scheduler_config.use_per_layer_block_manager:
+            kv_caches = [
+                kv_caches[0] for _layer_id in range(
+                    self.model_config.get_num_layers(self.parallel_config))
+            ]
+
         multi_modal_kwargs = model_input.multi_modal_kwargs or {}
         with set_forward_context(model_input.attn_metadata):
             hidden_or_intermediate_states = model_executable(
@@ -265,6 +270,11 @@ class EncoderDecoderModelRunner(GPUModelRunnerBase[EncoderDecoderModelInput]):
                               EncoderDecoderManager):
                     self._update_encoder_model_attn_metadata(
                         attn_metadata, seq_group_metadata_list, layer_id)
+        elif self.use_per_layer_attn_metadata:
+            # if not using per-layer block manager, the attn_metadata of
+            # different layers are the same object, so we only update the first
+            self._update_encoder_model_attn_metadata(
+                model_input.attn_metadata[0], seq_group_metadata_list, None)
         else:
             self._update_encoder_model_attn_metadata(model_input.attn_metadata,
                                                      seq_group_metadata_list,
@@ -481,10 +491,10 @@ class EncoderDecoderModelRunner(GPUModelRunnerBase[EncoderDecoderModelInput]):
                     cross_block_table = seq_group_metadata.cross_block_table
                 else:
                     assert len(seq_group_metadata.block_tables) == 1
-                    seq_id =  next(iter(seq_group_metadata.block_tables))
+                    seq_id = next(iter(seq_group_metadata.block_tables))
                     # using v3_block_manager
-                    cross_block_table = seq_group_metadata.block_tables[seq_id][
-                        layer_id]
+                    cross_block_table = seq_group_metadata.block_tables[
+                        seq_id][layer_id]
 
                 # Build slot mapping
                 is_profile_run = (seq_group_metadata.block_tables is None)
@@ -520,8 +530,8 @@ class EncoderDecoderModelRunner(GPUModelRunnerBase[EncoderDecoderModelInput]):
                     # using v3_block_manager
                     assert len(seq_group_metadata.block_tables) == 1
                     seq_id = next(iter(seq_group_metadata.block_tables))
-                    cross_block_table = seq_group_metadata.block_tables[seq_id][
-                        layer_id]
+                    cross_block_table = seq_group_metadata.block_tables[
+                        seq_id][layer_id]
                 for _ in range(len(seq_group_metadata.seq_data)):
                     encoder_seq_lens.append(
                         seq_group_metadata.encoder_seq_data.get_len())
