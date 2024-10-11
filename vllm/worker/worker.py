@@ -221,15 +221,15 @@ class Worker(LocalOrDistributedWorkerBase):
 
         # Execute a forward pass with dummy inputs to profile the memory usage
         # of the model.
-        # self.model_runner.profile_run()
+        self.model_runner.profile_run()
 
-        # # Calculate the number of blocks that can be allocated with the
-        # # profiled peak memory.
-        # torch.cuda.synchronize()
-        # free_gpu_memory, total_gpu_memory = torch.cuda.mem_get_info()
+        # Calculate the number of blocks that can be allocated with the
+        # profiled peak memory.
+        torch.cuda.synchronize()
+        free_gpu_memory, total_gpu_memory = torch.cuda.mem_get_info()
 
-        free_gpu_memory = 40 * 1024 * 1024 * 1024
-        total_gpu_memory = 80 * 1024 * 1024 * 1024
+        # free_gpu_memory = 40 * 1024 * 1024 * 1024
+        # total_gpu_memory = 80 * 1024 * 1024 * 1024
 
         # NOTE(woosuk): Here we assume that the other processes using the same
         # GPU did not change their memory usage during the profiling.

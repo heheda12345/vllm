@@ -486,15 +486,6 @@ class EncoderDecoderModelRunner(GPUModelRunnerBase[EncoderDecoderModelInput]):
                 # Build seq lens
                 seq_len = seq_group_metadata.encoder_seq_data.get_len()
                 encoder_seq_lens.append(seq_len)
-                if layer_id is None:
-                    # using v2_block_manager
-                    cross_block_table = seq_group_metadata.cross_block_table
-                else:
-                    assert len(seq_group_metadata.block_tables) == 1
-                    seq_id = next(iter(seq_group_metadata.block_tables))
-                    # using v3_block_manager
-                    cross_block_table = seq_group_metadata.block_tables[
-                        seq_id][layer_id]
 
                 # Build slot mapping
                 is_profile_run = (seq_group_metadata.block_tables is None)
@@ -505,6 +496,15 @@ class EncoderDecoderModelRunner(GPUModelRunnerBase[EncoderDecoderModelInput]):
                     # In embeddings, the block tables are {seq_id: None}.
                     cross_slot_mapping.extend([PAD_SLOT_ID] * seq_len)
                 else:
+                    if layer_id is None:
+                        # using v2_block_manager
+                        cross_block_table = seq_group_metadata.cross_block_table
+                    else:
+                        assert len(seq_group_metadata.block_tables) == 1
+                        seq_id = next(iter(seq_group_metadata.block_tables))
+                        # using per_layer_block_manager
+                        cross_block_table = seq_group_metadata.block_tables[
+                            seq_id][layer_id]
                     for i in range(0, seq_len):
                         block_number = cross_block_table[i // self.block_size]
                         block_offset = i % self.block_size

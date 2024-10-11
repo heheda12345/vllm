@@ -210,8 +210,9 @@ class CommonMetadataBuilder(AttentionMetadataBuilder[TAttentionMetadata]):
             start_idx = compute_slot_mapping_start_idx(
                 is_prompt, query_len, context_len, self.sliding_window,
                 self.use_v2_block_manager)
-
-            if self.use_per_layer_block_manager:
+            if is_profile_run:
+                block_table = None
+            elif self.use_per_layer_block_manager:
                 block_table = inter_data.block_tables[seq_id][self.layer_id]
             else:
                 block_table = inter_data.block_tables[seq_id]

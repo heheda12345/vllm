@@ -379,10 +379,11 @@ class EngineArgs:
             help='Use BlockSpaceMangerV2. By default this is set to True. '
             'Set to False to use BlockSpaceManagerV1')
         parser.add_argument(
-            '--use-v3-block-manager',
+            '--use-per-layer-block-manager',
             default=EngineArgs.use_per_layer_block_manager,
             action='store_true',
-            help='Use BlockSpaceMangerV3. By default this is set to False. '
+            help=
+            'Use PerlayerBlockSpaceManager. By default this is set to False. '
             'Set to True to use PerlayerBlockSpaceManager')
         parser.add_argument(
             '--num-lookahead-slots',
