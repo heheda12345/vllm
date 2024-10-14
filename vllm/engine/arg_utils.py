@@ -379,6 +379,12 @@ class EngineArgs:
             help='Use BlockSpaceMangerV2. By default this is set to True. '
             'Set to False to use BlockSpaceManagerV1')
         parser.add_argument(
+            '--disable-v2-block-manager',
+            action='store_false',
+            dest='use_v2_block_manager',
+            default=EngineArgs.use_v2_block_manager,
+        )
+        parser.add_argument(
             '--use-per-layer-block-manager',
             default=EngineArgs.use_per_layer_block_manager,
             action='store_true',

@@ -315,37 +315,53 @@ class CommonAttentionState(AttentionState):
         self._is_graph_capturing = False
 
     @contextmanager
-    def graph_capture(self, max_batch_size: int):
+    def graph_capture(self,
+                      max_batch_size: int,
+                      attn_metadata_keys: Optional[list[Any]] = None):
         self._is_graph_capturing = True
-        self._graph_slot_mapping = torch.full((max_batch_size, ),
-                                              PAD_SLOT_ID,
-                                              dtype=torch.long,
-                                              device=self.runner.device)
-        self._graph_seq_lens = torch.ones(max_batch_size,
-                                          dtype=torch.int32,
-                                          device=self.runner.device)
-        self._graph_block_tables = torch.from_numpy(
-            self.runner.graph_block_tables).to(device=self.runner.device)
+        self._pre_alloc_tensors = {}
+        # TODO: for models without kv cache, we do not need to allocate the following tensors
+        if len(attn_metadata_keys) == 0:
+            attn_metadata_keys = [0]
+        for key in attn_metadata_keys:
+            self._pre_alloc_tensors[key] = {
+                'slot_mapping':
+                torch.full((max_batch_size, ),
+                           PAD_SLOT_ID,
+                           dtype=torch.long,
+                           device=self.runner.device),
+                'seq_lens':
+                torch.ones(max_batch_size,
+                           dtype=torch.int32,
+                           device=self.runner.device),
+                'block_tables':
+                torch.from_numpy(self.runner.graph_block_tables).to(
+                    device=self.runner.device)
+            }
         yield
         self._is_graph_capturing = False
-        del self._graph_slot_mapping
-        del self._graph_seq_lens
-        del self._graph_block_tables
+        del self._pre_alloc_tensors
 
     def graph_clone(self, batch_size: int) -> "CommonAttentionState":
         assert self._is_graph_capturing
         return self.__class__(self.runner)
 
     def graph_capture_get_metadata_for_batch(
-            self, batch_size: int, is_encoder_decoder_model: bool = False):
+            self,
+            batch_size: int,
+            is_encoder_decoder_model: bool = False,
+            layer_id: Optional[int] = None) -> Dict[str, Any]:
         assert self._is_graph_capturing
+        if layer_id is None:
+            layer_id = 0
+        pre_alloc_tensors = self._pre_alloc_tensors[layer_id]
         attn_metadata = self.runner.attn_backend.make_metadata(
             num_prefills=0,
             num_prefill_tokens=0,
             num_decode_tokens=batch_size,
-            slot_mapping=self._graph_slot_mapping[:batch_size],
+            slot_mapping=pre_alloc_tensors['slot_mapping'][:batch_size],
             seq_lens=None,
-            seq_lens_tensor=self._graph_seq_lens[:batch_size],
+            seq_lens_tensor=pre_alloc_tensors['seq_lens'][:batch_size],
             max_query_len=1,
             decode_query_len=1,
             max_prefill_seq_len=0,
@@ -353,7 +369,7 @@ class CommonAttentionState(AttentionState):
             query_start_loc=None,
             seq_start_loc=None,
             context_lens_tensor=None,
-            block_tables=self._graph_block_tables[:batch_size],
+            block_tables=pre_alloc_tensors['block_tables'][:batch_size],
             use_cuda_graph=True,
         )
         if is_encoder_decoder_model:
@@ -371,19 +387,35 @@ class CommonAttentionState(AttentionState):
             self,
             attn_metadata,
             is_encoder_decoder_model: bool = False) -> Dict[str, Any]:
-        input_buffers = {
-            "slot_mapping": attn_metadata.slot_mapping,
-            "seq_lens_tensor": attn_metadata.decode_metadata.seq_lens_tensor,
-            "block_tables": attn_metadata.decode_metadata.block_tables,
-        }
-        if is_encoder_decoder_model:
-            # The encoder decoder model works only with XFormers backend.
-            # Assert the same.
-            assert self.runner.attn_backend.get_name() == "xformers", \
-            f"Expected attn_backend name to be 'xformers', but "\
-            f" got '{self.runner.attn_backend.get_name()}'"
-            self._add_additonal_input_buffers_for_enc_dec_model(
-                attn_metadata=attn_metadata, input_buffers=input_buffers)
+        if isinstance(attn_metadata, dict):
+            per_layer_attn_meta_buffer = {
+                layer_id: {
+                    "slot_mapping": attn.slot_mapping,
+                    "seq_lens_tensor": attn.decode_metadata.seq_lens_tensor,
+                    "block_tables": attn.decode_metadata.block_tables,
+                }
+                for layer_id, attn in attn_metadata.items()
+            }
+            if is_encoder_decoder_model:
+                raise NotImplementedError
+            input_buffers = {
+                'per_layer_attn_metadata': per_layer_attn_meta_buffer
+            }
+        else:
+            input_buffers = {
+                "slot_mapping": attn_metadata.slot_mapping,
+                "seq_lens_tensor":
+                attn_metadata.decode_metadata.seq_lens_tensor,
+                "block_tables": attn_metadata.decode_metadata.block_tables,
+            }
+            if is_encoder_decoder_model:
+                # The encoder decoder model works only with XFormers backend.
+                # Assert the same.
+                assert self.runner.attn_backend.get_name() == "xformers", \
+                f"Expected attn_backend name to be 'xformers', but "\
+                f" got '{self.runner.attn_backend.get_name()}'"
+                self._add_additonal_input_buffers_for_enc_dec_model(
+                    attn_metadata=attn_metadata, input_buffers=input_buffers)
         return input_buffers
 
     def prepare_graph_input_buffers(
@@ -391,18 +423,34 @@ class CommonAttentionState(AttentionState):
             input_buffers,
             attn_metadata,
             is_encoder_decoder_model: bool = False) -> None:
-        input_buffers["seq_lens_tensor"].copy_(
-            attn_metadata.decode_metadata.seq_lens_tensor, non_blocking=True)
-        input_buffers["block_tables"].copy_(
-            attn_metadata.decode_metadata.block_tables, non_blocking=True)
-        if is_encoder_decoder_model:
-            # The encoder decoder model works only with XFormers backend.
-            # Assert the same.
-            assert self.runner.attn_backend.get_name() == "xformers", \
-            f"Expected attn_backend name to be 'xformers', but "\
-            f" got '{self.runner.attn_backend.get_name()}'"
-            self._prepare_input_buffers_for_enc_dec_model(
-                attn_metadata, input_buffers)
+        if isinstance(attn_metadata, dict):
+            per_layer_attn_meta_buffer = input_buffers[
+                "per_layer_attn_metadata"]
+            for layer_id, attn in attn_metadata.items():
+                per_layer_attn_meta_buffer[layer_id]["slot_mapping"].copy_(
+                    attn.slot_mapping, non_blocking=True)
+                per_layer_attn_meta_buffer[layer_id]["seq_lens_tensor"].copy_(
+                    attn.decode_metadata.seq_lens_tensor, non_blocking=True)
+                per_layer_attn_meta_buffer[layer_id]["block_tables"].copy_(
+                    attn.decode_metadata.block_tables, non_blocking=True)
+            if is_encoder_decoder_model:
+                raise NotImplementedError
+        else:
+            input_buffers["slot_mapping"].copy_(attn_metadata.slot_mapping,
+                                                non_blocking=True)
+            input_buffers["seq_lens_tensor"].copy_(
+                attn_metadata.decode_metadata.seq_lens_tensor,
+                non_blocking=True)
+            input_buffers["block_tables"].copy_(
+                attn_metadata.decode_metadata.block_tables, non_blocking=True)
+            if is_encoder_decoder_model:
+                # The encoder decoder model works only with XFormers backend.
+                # Assert the same.
+                assert self.runner.attn_backend.get_name() == "xformers", \
+                f"Expected attn_backend name to be 'xformers', but "\
+                f" got '{self.runner.attn_backend.get_name()}'"
+                self._prepare_input_buffers_for_enc_dec_model(
+                    attn_metadata, input_buffers)
 
     def begin_forward(self, model_input) -> None:
         return

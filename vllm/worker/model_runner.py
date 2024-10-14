@@ -454,8 +454,7 @@ class ModelInputForGPUBuilder(ModelRunnerInputBuilderBase[ModelInputForGPU]):
         # Attention metadata inputs.
         if self.scheduler_config.use_per_layer_block_manager:
             self.attn_metadata_builders = {
-                layer_id:
-                self.attn_backend.make_metadata_builder(
+                layer_id: self.attn_backend.make_metadata_builder(
                     weakref.proxy(self), layer_id,
                     app_attn_metadata_builders[layer_id])
                 for layer_id in app_attn_metadata_builders
@@ -1036,6 +1035,7 @@ class GPUModelRunnerBase(ModelRunnerBase[TModelInputForGPU]):
         # in numpy and only copy the actual input content at every iteration.
         # The shape of the cached block table will be
         # (max batch size to capture, max context len to capture / block size).
+        # TODO: check this
         self.graph_block_tables = np.zeros(
             (self.max_batchsize_to_capture, self.get_max_block_per_batch()),
             dtype=np.int32)
@@ -1090,8 +1090,8 @@ class GPUModelRunnerBase(ModelRunnerBase[TModelInputForGPU]):
         if self.scheduler_config.use_per_layer_block_manager:
             self.app_attn_metadata_builders = block_manager_registry \
                 .get_managers_of_model(self.model_config, self.cache_config, self.parallel_config)
-            assert self.model_config.enforce_eager, (
-                "v3 block manager is not compatible with cuda graph.")
+            # assert self.model_config.enforce_eager, (
+            #     "per-layer block manager is not compatible with cuda graph.")
         else:
             self.app_attn_metadata_builders = {}
 
@@ -1477,19 +1477,52 @@ class GPUModelRunnerBase(ModelRunnerBase[TModelInputForGPU]):
         batch_size_capture_list = [
             bs for bs in _BATCH_SIZES_TO_CAPTURE if bs <= graph_batch_size
         ]
-
         with self.attn_state.graph_capture(
-                max_batch_size), graph_capture() as graph_capture_context:
+                max_batch_size, self.app_attn_metadata_builders.keys()
+        ), graph_capture() as graph_capture_context:
             # NOTE: Capturing the largest batch size first may help reduce the
             # memory usage of CUDA graph.
             for virtual_engine in range(
                     self.parallel_config.pipeline_parallel_size):
                 for batch_size in reversed(batch_size_capture_list):
-                    attn_metadata = (
-                        self.attn_state.graph_capture_get_metadata_for_batch(
-                            batch_size,
-                            is_encoder_decoder_model=self.model_config.
-                            is_encoder_decoder_model))
+                    kv_cache = kv_caches[virtual_engine]
+                    if self.use_per_layer_attn_metadata:
+                        if self.scheduler_config.use_per_layer_block_manager:
+                            attn_metadata = {
+                                layer_id: self.attn_state.
+                                graph_capture_get_metadata_for_batch(
+                                    batch_size,
+                                    is_encoder_decoder_model=self.model_config.
+                                    is_encoder_decoder_model,
+                                    layer_id=layer_id)
+                                for layer_id in
+                                self.app_attn_metadata_builders.keys()
+                            }
+                            assert len(kv_cache) == 1
+                            kv_cache = [
+                                kv_cache[0] for _layer_id in range(
+                                    self.model_config.get_num_layers(
+                                        self.parallel_config))
+                            ]
+                        else:
+                            unified_attn_metadata = self.attn_state.graph_capture_get_metadata_for_batch(
+                                batch_size,
+                                is_encoder_decoder_model=self.model_config.
+                                is_encoder_decoder_model)
+                            attn_metadata = {
+                                layer_id: unified_attn_metadata
+                                for layer_id in range(
+                                    self.model_config.get_num_layers(
+                                        self.parallel_config))
+                            }
+
+                    else:
+                        attn_metadata = (
+                            self.attn_state.
+                            graph_capture_get_metadata_for_batch(
+                                batch_size,
+                                is_encoder_decoder_model=self.model_config.
+                                is_encoder_decoder_model))
 
                     if self.lora_config:
                         lora_mapping = LoRAMapping(
@@ -1509,7 +1542,6 @@ class GPUModelRunnerBase(ModelRunnerBase[TModelInputForGPU]):
                         self.model, self.attn_backend.get_name(),
                         self.attn_state.graph_clone(batch_size),
                         self.model_config.is_encoder_decoder_model)
-
                     capture_inputs = {
                         "input_ids":
                         input_tokens[:batch_size],
@@ -1525,7 +1557,7 @@ class GPUModelRunnerBase(ModelRunnerBase[TModelInputForGPU]):
                         intermediate_inputs[:batch_size]
                         if intermediate_inputs is not None else None,
                         "kv_caches":
-                        kv_caches[virtual_engine],
+                        kv_cache,
                         "attn_metadata":
                         attn_metadata,
                         "memory_pool":
@@ -1671,12 +1703,30 @@ class ModelRunner(GPUModelRunnerBase[ModelInputForGPUWithSamplingMetadata]):
         if not self.model_config.enforce_eager:
             # Currently cuda graph is only supported by the decode phase.
             assert model_input.attn_metadata is not None
-            prefill_meta = model_input.attn_metadata.prefill_metadata
-            decode_meta = model_input.attn_metadata.decode_metadata
+            attn_metadata = model_input.attn_metadata
+            if isinstance(attn_metadata, dict):
+                prefill_meta = {
+                    layer_id: attn_metadata[layer_id].prefill_metadata
+                    for layer_id in attn_metadata.keys()
+                }
+                decode_meta = {
+                    layer_id: attn_metadata[layer_id].decode_metadata
+                    for layer_id in attn_metadata.keys()
+                }
+                is_prefill = any(attn is not None
+                                 for attn in prefill_meta.values())
+                decode_use_cuda_graph = all(
+                    attn is not None and attn.use_cuda_graph
+                    for attn in decode_meta.values())
+            else:
+                prefill_meta = model_input.attn_metadata.prefill_metadata
+                is_prefill = prefill_meta is not None
+                decode_meta = model_input.attn_metadata.decode_metadata
+                decode_use_cuda_graph = decode_meta is not None and decode_meta.use_cuda_graph
             # TODO(andoorve): We can remove this once all
             # virtual engines share the same kv cache.
             virtual_engine = model_input.virtual_engine
-            if prefill_meta is None and decode_meta.use_cuda_graph:
+            if not is_prefill and decode_use_cuda_graph:
                 assert model_input.input_tokens is not None
                 graph_batch_size = model_input.input_tokens.shape[0]
                 model_executable = self.graph_runners[virtual_engine][
@@ -1901,8 +1951,6 @@ class CUDAGraphRunner:
         # Copy the input tensors to the input buffers.
         self.input_buffers["input_ids"].copy_(input_ids, non_blocking=True)
         self.input_buffers["positions"].copy_(positions, non_blocking=True)
-        self.input_buffers["slot_mapping"].copy_(attn_metadata.slot_mapping,
-                                                 non_blocking=True)
         self.attn_state.prepare_graph_input_buffers(
             self.input_buffers, attn_metadata, self._is_encoder_decoder_model)
         if "seqlen_agnostic_capture_inputs" in self.input_buffers:
@@ -1923,7 +1971,6 @@ class CUDAGraphRunner:
                 kwargs['encoder_input_ids'], non_blocking=True)
             self.input_buffers["encoder_positions"].copy_(
                 kwargs['encoder_positions'], non_blocking=True)
-
         # Run the graph.
         self.graph.replay()
         # Return the output tensor.
