@@ -65,7 +65,6 @@ class PerlayerBlockSpaceManager(BlockSpaceManager):
             seq_group,
             num_lookahead_slots=num_lookahead_slots,
         )
-        print("num_required_blocks: ", num_required_blocks)
 
         num_free_gpu_blocks = self.global_block_allocator.get_num_free_blocks(
             device=Device.GPU)
@@ -166,18 +165,10 @@ class PerlayerBlockSpaceManager(BlockSpaceManager):
         return block_ids
 
     def get_num_free_gpu_blocks(self) -> int:
-        import pdb
-        pdb.set_trace()
-        raise NotImplementedError(
-            "not implemented: PerlayerBlockSpaceManager.get_num_free_gpu_blocks"
-        )
+        return self.global_block_allocator.get_num_free_blocks(Device.GPU)
 
     def get_num_free_cpu_blocks(self) -> int:
-        import pdb
-        pdb.set_trace()
-        raise NotImplementedError(
-            "not implemented: PerlayerBlockSpaceManager.get_num_free_cpu_blocks"
-        )
+        return self.global_block_allocator.get_num_free_blocks(Device.CPU)
 
     def access_all_blocks_in_seq(
         self,
@@ -210,11 +201,8 @@ class PerlayerBlockSpaceManager(BlockSpaceManager):
 
     def get_prefix_cache_hit_rate(self, device: Device) -> float:
         """Prefix cache hit rate. -1 means not supported or disabled."""
-        import pdb
-        pdb.set_trace()
-        raise NotImplementedError(
-            "not implemented: PerlayerBlockSpaceManager.get_prefix_cache_hit_rate"
-        )
+        return self.global_block_allocator.get_prefix_cache_hit_rate(
+            Device.GPU)
 
     # for the compatibility with current Scheduler. Can be removed later
     def get_cross_block_table(self, seq_group: SequenceGroup) -> List[int]:
