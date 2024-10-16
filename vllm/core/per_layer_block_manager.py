@@ -30,7 +30,7 @@ class PerlayerBlockSpaceManager(BlockSpaceManager):
         self.num_total_gpu_blocks = num_gpu_blocks
         self.num_total_cpu_blocks = num_cpu_blocks
         if sliding_window is not None:
-            raise NotImplementedError("Sliding window is not supported")
+            logger.warning("sliding_window can be deprecated in the future.")
         if enable_caching:
             raise NotImplementedError("Prefix caching is not supported")
 

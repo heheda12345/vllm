@@ -236,10 +236,6 @@ def which_attn_to_use(
                 "Cannot use FlashAttention-2 backend for block size not "
                 "divisible by 16.")
             selected_backend = _Backend.XFORMERS
-        elif sliding_window is not None:
-            logger.info(
-                "Cannot use FlashAttention-2 backend due to sliding window.")
-            selected_backend = _Backend.XFORMERS
 
     # FlashAttn is valid for the model, checking if the package is installed.
     if selected_backend == _Backend.FLASH_ATTN:

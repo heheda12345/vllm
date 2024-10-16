@@ -13,6 +13,7 @@ from vllm.attention.backends.utils import (PAD_SLOT_ID, CommonAttentionState,
                                            compute_slot_mapping,
                                            compute_slot_mapping_start_idx,
                                            is_block_tables_empty)
+from vllm.core.block_v3.custom_block import SlidingWindowManager
 from vllm.forward_context import get_forward_context
 from vllm.utils import async_tensor_h2d, make_tensor_with_pad
 
@@ -362,8 +363,13 @@ class FlashAttentionMetadataBuilder(
                     raise NotImplementedError
                 elif (not is_prompt and block_tables is not None):
                     block_table = block_tables[seq_id][self.layer_id]
-                    if curr_sliding_window_block > 0:
-                        raise NotImplementedError
+                    if curr_sliding_window_block != 0 and isinstance(
+                            self.app_attn_metadata_builder,
+                            SlidingWindowManager):
+                        block_table = block_tables[seq_id][
+                            self.layer_id][-curr_sliding_window_block:]
+                    else:
+                        block_table = block_tables[seq_id][self.layer_id]
                 self.block_tables.append(block_table)
             else:
                 if prefix_cache_hit:
@@ -560,8 +566,8 @@ class FlashAttentionImpl(AttentionImpl):
         if alibi_slopes is not None:
             alibi_slopes = torch.tensor(alibi_slopes, dtype=torch.float32)
         self.alibi_slopes = alibi_slopes
-        self.sliding_window = ((sliding_window, sliding_window)
-                               if sliding_window is not None else (-1, -1))
+        self.sliding_window = ((sliding_window - 1,
+                                0) if sliding_window is not None else (-1, -1))
         self.kv_cache_dtype = kv_cache_dtype
         if logits_soft_cap is None:
             # In flash-attn, setting logits_soft_cap as 0 means no soft cap.
@@ -570,12 +576,6 @@ class FlashAttentionImpl(AttentionImpl):
 
         assert self.num_heads % self.num_kv_heads == 0
         self.num_queries_per_kv = self.num_heads // self.num_kv_heads
-
-        if sliding_window is not None:
-            # NOTE(woosuk): flash-attn's sliding window does not work with
-            # paged KV cache.
-            raise ValueError(
-                "Sliding window is not supported in FlashAttention.")
 
         support_head_sizes = FlashAttentionBackend.get_supported_head_sizes()
         if head_size not in support_head_sizes:
@@ -747,6 +747,7 @@ def unified_flash_attention(
                 max_seqlen_k=max_seq_len,
                 softmax_scale=softmax_scale,
                 causal=True,
+                window_size=window_size,
                 alibi_slopes=alibi_slopes,
                 block_table=prefill_meta.block_tables,
                 softcap=logits_soft_cap,
@@ -767,7 +768,7 @@ def unified_flash_attention(
             causal=True,
             alibi_slopes=alibi_slopes,
             softcap=logits_soft_cap,
-        ).squeeze(1)
+            window_size=window_size).squeeze(1)
 
     if prefill_output is None:
         assert decode_output is not None
