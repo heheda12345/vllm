@@ -24,7 +24,9 @@ from torch import nn
 from transformers import OPTConfig
 
 from vllm.attention import Attention, AttentionMetadata
-from vllm.config import CacheConfig
+from vllm.config import CacheConfig, ModelConfig, ParallelConfig
+from vllm.core.block_v3.custom_block import SelfAttentionManager
+from vllm.core.block_v3.registry import BLOCK_MANAGER_REGISTRY
 from vllm.distributed import get_pp_group, get_tensor_model_parallel_world_size
 from vllm.model_executor.layers.activation import get_act_fn
 from vllm.model_executor.layers.linear import (ColumnParallelLinear,
@@ -43,6 +45,17 @@ from vllm.sequence import IntermediateTensors
 from .interfaces import SupportsPP
 from .utils import (is_pp_missing_parameter,
                     make_empty_intermediate_tensors_factory, make_layers)
+
+
+def custom_block_manager_for_opt(model_config: ModelConfig,
+                                 cache_config: CacheConfig,
+                                 parallel_config: ParallelConfig):
+    custom_managers = {}
+    for i in range(model_config.get_num_layers(parallel_config)):
+        custom_managers[i] = SelfAttentionManager(model_config,
+                                                  parallel_config,
+                                                  cache_config.cache_dtype)
+    return custom_managers
 
 
 class OPTLearnedPositionalEmbedding(nn.Embedding):
@@ -102,10 +115,16 @@ class OPTAttention(nn.Module):
         hidden_states: torch.Tensor,
         kv_cache: torch.Tensor,
         attn_metadata: AttentionMetadata,
+        layer_id: Optional[int] = None,
     ) -> torch.Tensor:
         qkv, _ = self.qkv_proj(hidden_states)
         q, k, v = qkv.chunk(chunks=3, dim=-1)
-        attn_output = self.attn(q, k, v, kv_cache, attn_metadata)
+        attn_output = self.attn(q,
+                                k,
+                                v,
+                                kv_cache,
+                                attn_metadata,
+                                layer_id=layer_id)
         output, _ = self.out_proj(attn_output)
         return output
 
@@ -156,6 +175,7 @@ class OPTDecoderLayer(nn.Module):
         hidden_states: torch.Tensor,
         kv_cache: torch.Tensor,
         attn_metadata: AttentionMetadata,
+        layer_id: Optional[int] = None,
     ) -> torch.Tensor:
         # Self Attention
         residual = hidden_states
@@ -164,7 +184,8 @@ class OPTDecoderLayer(nn.Module):
             hidden_states = self.self_attn_layer_norm(hidden_states)
         hidden_states = self.self_attn(hidden_states=hidden_states,
                                        kv_cache=kv_cache,
-                                       attn_metadata=attn_metadata)
+                                       attn_metadata=attn_metadata,
+                                       layer_id=layer_id)
         hidden_states = residual + hidden_states
         # 350m applies layer norm AFTER attention
         if not self.do_layer_norm_before:
@@ -268,7 +289,8 @@ class OPTDecoder(nn.Module):
             layer = self.layers[i]
             hidden_states = layer(hidden_states,
                                   kv_caches[i - self.start_layer],
-                                  attn_metadata)
+                                  attn_metadata[i - self.start_layer],
+                                  i - self.start_layer)
 
         if not get_pp_group().is_last_rank:
             return IntermediateTensors({"hidden_states": hidden_states})
@@ -313,6 +335,7 @@ class OPTModel(nn.Module):
                             inputs_embeds=inputs_embeds)
 
 
+@BLOCK_MANAGER_REGISTRY.register_block_manager(custom_block_manager_for_opt)
 class OPTForCausalLM(nn.Module, SupportsPP):
 
     def __init__(

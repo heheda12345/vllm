@@ -8,9 +8,7 @@ import pytest
 
 from ...models.utils import check_outputs_equal
 
-MODELS = [
-    "meta-llama/Llama-3.2-1B-Instruct",
-]
+MODELS = ["meta-llama/Llama-3.2-1B-Instruct", "facebook/opt-125m"]
 
 
 @pytest.mark.parametrize("model", MODELS)
