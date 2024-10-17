@@ -576,7 +576,6 @@ class CacheConfig:
         swap_space: float,
         cache_dtype: str,
         num_gpu_blocks_override: Optional[int] = None,
-        sliding_window: Optional[int] = None,
         enable_prefix_caching: bool = False,
         cpu_offload_gb: float = 0,
     ) -> None:
@@ -585,7 +584,6 @@ class CacheConfig:
         self.swap_space_bytes = swap_space * GiB_bytes
         self.num_gpu_blocks_override = num_gpu_blocks_override
         self.cache_dtype = cache_dtype
-        self.sliding_window = sliding_window
         self.enable_prefix_caching = enable_prefix_caching
         self.cpu_offload_gb = cpu_offload_gb
         self._verify_args()

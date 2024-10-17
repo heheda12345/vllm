@@ -19,9 +19,8 @@ models = [
     'use_v2_block_manager': False,
     'use_per_layer_block_manager': True,
     'max_model_len': 8192,
-    'enforce_eager': True,
 }])
-def test_models(
+def test_gemma2_model(
     hf_runner,
     vllm_runner,
     model: str,
@@ -30,7 +29,8 @@ def test_models(
 ) -> None:
     prompts, answer, indices = prep_prompts(5)
 
-    with vllm_runner(model, **vllm_engine_args) as vllm_model:
+    with vllm_runner(model, dtype="bfloat16",
+                     **vllm_engine_args) as vllm_model:
         check_window(prompts)(vllm_model.model)
         vllm_outputs = vllm_model.generate_greedy(prompts, max_tokens)
     vllm_output_strs = []
@@ -39,7 +39,7 @@ def test_models(
         vllm_output_strs.append(o[1][len(prompt):])
     print("vllm_outputs:", vllm_output_strs)
 
-    with hf_runner(model) as hf_model:
+    with hf_runner(model, dtype="bfloat16") as hf_model:
         hf_outputs = hf_model.generate_greedy(prompts, max_tokens)
     hf_output_strs = []
     for prompt, o in zip(prompts, hf_outputs):

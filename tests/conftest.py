@@ -608,7 +608,7 @@ class VllmRunner:
         # Use smaller max model length, otherwise bigger model cannot run due
         # to kv cache size limit.
         max_model_len: int = 1024,
-        # dtype: str = "half",
+        dtype: str = "half",
         disable_log_stats: bool = True,
         tensor_parallel_size: int = 1,
         block_size: int = 16,
@@ -621,7 +621,7 @@ class VllmRunner:
             model=model_name,
             tokenizer=tokenizer_name,
             trust_remote_code=True,
-            # dtype=dtype,
+            dtype=dtype,
             swap_space=swap_space,
             enforce_eager=enforce_eager,
             disable_log_stats=disable_log_stats,

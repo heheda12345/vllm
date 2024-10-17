@@ -36,16 +36,16 @@ class Attention(nn.Module):
         blocksparse_params: Optional[Dict[str, Any]] = None,
         logits_soft_cap: Optional[float] = None,
         prefix: str = "",
+        sliding_window: Optional[int] = None,
     ) -> None:
         super().__init__()
+        # ALL sliding window is required to be provided by the model
         if cache_config is not None:
             kv_cache_dtype = cache_config.cache_dtype
             block_size = cache_config.block_size
-            sliding_window = cache_config.sliding_window
         else:
             kv_cache_dtype = "auto"
             block_size = 16
-            sliding_window = None
         if num_kv_heads is None:
             num_kv_heads = num_heads
 

@@ -566,7 +566,7 @@ class FlashAttentionImpl(AttentionImpl):
         if alibi_slopes is not None:
             alibi_slopes = torch.tensor(alibi_slopes, dtype=torch.float32)
         self.alibi_slopes = alibi_slopes
-        self.sliding_window = ((sliding_window - 1,
+        self.sliding_window = ((sliding_window,
                                 0) if sliding_window is not None else (-1, -1))
         self.kv_cache_dtype = kv_cache_dtype
         if logits_soft_cap is None:
@@ -758,12 +758,17 @@ def unified_flash_attention(
         _, num_head, head_dim = decode_query.shape
         decode_query = decode_query.reshape(-1, decode_meta.decode_query_len,
                                             num_head, head_dim)
+        if window_size[0] != -1:
+            seq_lens_tensor = torch.clamp(decode_meta.seq_lens_tensor,
+                                          max=window_size[0])
+        else:
+            seq_lens_tensor = decode_meta.seq_lens_tensor
         decode_output = flash_attn_with_kvcache(
             q=decode_query,
             k_cache=key_cache,
             v_cache=value_cache,
             block_table=decode_meta.block_tables,
-            cache_seqlens=decode_meta.seq_lens_tensor,
+            cache_seqlens=seq_lens_tensor,
             softmax_scale=softmax_scale,
             causal=True,
             alibi_slopes=alibi_slopes,

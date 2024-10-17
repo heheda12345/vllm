@@ -341,7 +341,6 @@ class Scheduler:
                 block_size=self.cache_config.block_size,
                 num_gpu_blocks=num_gpu_blocks,
                 num_cpu_blocks=num_cpu_blocks,
-                sliding_window=self.cache_config.sliding_window,
                 enable_caching=self.cache_config.enable_prefix_caching,
                 custom_block_manager=custom_block_manager)
         else:
@@ -349,7 +348,6 @@ class Scheduler:
                 block_size=self.cache_config.block_size,
                 num_gpu_blocks=num_gpu_blocks,
                 num_cpu_blocks=num_cpu_blocks,
-                sliding_window=self.cache_config.sliding_window,
                 enable_caching=self.cache_config.enable_prefix_caching)
 
         # Sequence groups in the WAITING state.

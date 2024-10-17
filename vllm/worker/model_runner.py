@@ -602,7 +602,6 @@ class ModelInputForGPUBuilder(ModelRunnerInputBuilderBase[ModelInputForGPU]):
 
         inter_data.curr_sliding_window_blocks[
             seq_idx] = curr_sliding_window_block
-        inter_data.seq_lens[seq_idx] = sliding_seq_len
 
     def _compute_lora_input(self, inter_data: InterDataForSeqGroup,
                             seq_idx: int,
