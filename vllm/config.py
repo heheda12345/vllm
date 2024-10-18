@@ -1100,6 +1100,7 @@ class SpeculativeConfig:
         speculative_max_model_len: Optional[int],
         enable_chunked_prefill: bool,
         use_v2_block_manager: bool,
+        use_per_layer_block_manager: bool,
         disable_log_stats: bool,
         speculative_disable_by_batch_size: Optional[int],
         ngram_prompt_lookup_max: Optional[int],
@@ -1191,7 +1192,7 @@ class SpeculativeConfig:
                 "Speculative decoding and chunked prefill are "
                 f"currently mutually exclusive ({enable_chunked_prefill=}).")
 
-        if not use_v2_block_manager:
+        if not use_v2_block_manager and not use_per_layer_block_manager:
             raise ValueError(
                 "Speculative decoding requires usage of the V2 "
                 "block manager. Enable it with --use-v2-block-manager.")
@@ -1463,8 +1464,8 @@ class SpeculativeConfig:
                              "typical_acceptance_sampler.")
 
         if (self.draft_token_acceptance_method != 'rejection_sampler'
-                and self.draft_token_acceptance_method !=
-                'typical_acceptance_sampler'):
+                and self.draft_token_acceptance_method
+                != 'typical_acceptance_sampler'):
             raise ValueError(
                 "Expected draft_token_acceptance_method to be either "
                 "rejection_sampler or typical_acceptance_sampler. Instead it "

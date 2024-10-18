@@ -202,8 +202,61 @@ class Worker(LocalOrDistributedWorkerBase):
             tensorizer_config=tensorizer_config, )
 
     @torch.inference_mode()
-    def determine_num_available_blocks(
-            self, kv_cache_config: Optional[KVCacheConfig]) -> Tuple[int, int]:
+    def get_available_memory(self) -> Tuple[int, int]:
+        """Get the free GPU and CPU memory in bytes.
+        """
+        # Profile the memory usage of the model and get the maximum number of
+        # cache blocks that can be allocated with the remaining free memory.
+        torch.cuda.empty_cache()
+
+        # Execute a forward pass with dummy inputs to profile the memory usage
+        # of the model.
+        self.model_runner.profile_run()
+
+        # Calculate the number of blocks that can be allocated with the
+        # profiled peak memory.
+        torch.cuda.synchronize()
+        free_gpu_memory, total_gpu_memory = torch.cuda.mem_get_info()
+
+        # free_gpu_memory = 40 * 1024 * 1024 * 1024
+        # total_gpu_memory = 80 * 1024 * 1024 * 1024
+
+        # NOTE(woosuk): Here we assume that the other processes using the same
+        # GPU did not change their memory usage during the profiling.
+        peak_memory = self.init_gpu_memory - free_gpu_memory
+        assert peak_memory > 0, (
+            "Error in memory profiling. "
+            f"Initial free memory {self.init_gpu_memory}, current free memory"
+            f" {free_gpu_memory}. This happens when the GPU memory was "
+            "not properly cleaned up before initializing the vLLM instance.")
+
+        available_gpu_memory = total_gpu_memory * self.cache_config.gpu_memory_utilization - peak_memory
+        available_cpu_memory = self.cache_config.swap_space_bytes
+
+        return available_gpu_memory, available_cpu_memory
+
+    def initialize_cache_from_kv_cache_config(
+        self,
+        kv_cache_config: Optional[KVCacheConfig],
+    ) -> None:
+        """Allocate GPU and CPU KV cache with the specified number of blocks.
+
+        This also warms up the model, which may record CUDA graphs.
+        """
+        # TODO: find a good way for this check
+        # raise_if_cache_size_invalid(num_gpu_blocks,
+        #                             self.cache_config.block_size,
+        #                             self.model_config.max_model_len)
+
+        # avoid reading these attributes as they are useless
+        self.cache_config.__delattr__("num_gpu_blocks")
+        self.cache_config.__delattr__("num_cpu_blocks")
+
+        self._init_cache_engine(kv_cache_config)
+        self._warm_up_model()
+
+    @torch.inference_mode()
+    def determine_num_available_blocks(self) -> Tuple[int, int]:
         """Profiles the peak memory usage of the model to determine how many
         KV blocks may be allocated without OOMs.
 
@@ -239,11 +292,7 @@ class Worker(LocalOrDistributedWorkerBase):
             f"Initial free memory {self.init_gpu_memory}, current free memory"
             f" {free_gpu_memory}. This happens when the GPU memory was "
             "not properly cleaned up before initializing the vLLM instance.")
-        print("kv_cache_config", kv_cache_config)
-        if kv_cache_config is None:
-            cache_block_size = self.get_cache_block_size_bytes()
-        else:
-            cache_block_size = kv_cache_config.block_size_bytes
+        cache_block_size = self.get_cache_block_size_bytes()
         num_gpu_blocks = int(
             (total_gpu_memory * self.cache_config.gpu_memory_utilization -
              peak_memory) // cache_block_size)
@@ -257,8 +306,8 @@ class Worker(LocalOrDistributedWorkerBase):
         torch.cuda.empty_cache()
         return num_gpu_blocks, num_cpu_blocks
 
-    def initialize_cache(self, num_gpu_blocks: int, num_cpu_blocks: int,
-                         kv_cache_config: Optional[KVCacheConfig]) -> None:
+    def initialize_cache(self, num_gpu_blocks: int,
+                         num_cpu_blocks: int) -> None:
         """Allocate GPU and CPU KV cache with the specified number of blocks.
 
         This also warms up the model, which may record CUDA graphs.
@@ -270,7 +319,7 @@ class Worker(LocalOrDistributedWorkerBase):
         self.cache_config.num_gpu_blocks = num_gpu_blocks
         self.cache_config.num_cpu_blocks = num_cpu_blocks
 
-        self._init_cache_engine(kv_cache_config)
+        self._init_cache_engine(None)
         self._warm_up_model()
 
     def _init_cache_engine(self, kv_cache_config: Optional[KVCacheConfig]):

@@ -21,20 +21,20 @@ CUSTOM_BLOCK_TABLE = Dict[int, BlockTable]
 
 def require_kv_config_init(func):
 
-    def wrapper(self, *args, **kwargs):
+    def require_kv_config_init_wrapper(self, *args, **kwargs):
         assert self._initialized, "KV cache config is not initialized"
         return func(self, *args, **kwargs)
 
-    return wrapper
+    return require_kv_config_init_wrapper
 
 
 def require_kv_config_not_init(func):
 
-    def wrapper(self, *args, **kwargs):
+    def require_kv_config_not_init_wrapper(self, *args, **kwargs):
         assert not self._initialized, "KV cache config is already initialized"
         return func(self, *args, **kwargs)
 
-    return wrapper
+    return require_kv_config_not_init_wrapper
 
 
 class CustomBlockManager:
@@ -51,7 +51,7 @@ class CustomBlockManager:
                                               num_logic_layers=-1)
 
     @require_kv_config_not_init
-    def compile(self):
+    def compile(self, available_cpu_memory: int, available_gpu_memory: int):
         self._kv_cache_config = self._get_kv_cache_config()
         for manager in self._app_aware_managers.values():
             manager.init_kv_cache_config(self._kv_cache_config)
@@ -63,17 +63,15 @@ class CustomBlockManager:
         assert self._initialized
         return self._kv_cache_config
 
-    def _get_cache_block_size(self):
+    def _get_kv_cache_config(self):
         page_sizes = [
             manager.get_page_size(self.cache_config.block_size)
             for manager in self._app_aware_managers.values()
         ]
         # We assume all components use the same page size now.
         assert all(page_size == page_sizes[0] for page_size in page_sizes)
-        return page_sizes[0]
+        block_size_bytes = page_sizes[0]
 
-    def _get_kv_cache_config(self):
-        block_size_bytes = self._get_cache_block_size()
         return KVCacheConfig(block_size_bytes=block_size_bytes,
                              num_logic_layers=1)
 
@@ -83,10 +81,16 @@ class CustomBlockManager:
         self._app_aware_managers.update(managers)
 
     @require_kv_config_not_init
-    def add_block_managers_of_model(self, model: "ModelConfig"):
+    def add_block_managers_of_model(self,
+                                    model: ModelConfig,
+                                    parallel_config: ParallelConfig,
+                                    prefix: str = ""):
         managers = BLOCK_MANAGER_REGISTRY.get_managers_of_model(
-            model, self.cache_config, self.parallel_config)
-        self.add_app_aware_managers(managers)
+            model, self.cache_config, parallel_config)
+        self.add_app_aware_managers({
+            f"{prefix}{layer_id}": manager
+            for layer_id, manager in managers.items()
+        })
 
     @require_kv_config_init
     def get_num_required_blocks(self,

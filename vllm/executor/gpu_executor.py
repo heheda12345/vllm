@@ -108,18 +108,13 @@ class GPUExecutor(ExecutorBase):
             rank=rank,
             distributed_init_method=distributed_init_method))
 
-    def determine_num_available_blocks(
-            self,
-            kv_cache_config: Optional[KVCacheConfig] = None
-    ) -> Tuple[int, int]:
+    def determine_num_available_blocks(self) -> Tuple[int, int]:
         """Determine the number of available KV blocks by invoking the
         underlying worker.
         """
-        return self.driver_worker.determine_num_available_blocks(
-            kv_cache_config)
+        return self.driver_worker.determine_num_available_blocks()
 
-    def initialize_cache(self, num_gpu_blocks: int, num_cpu_blocks,
-                         kv_cache_config: Optional[KVCacheConfig]) -> None:
+    def initialize_cache(self, num_gpu_blocks: int, num_cpu_blocks) -> None:
         """Initialize the KV cache by invoking the underlying worker.
         """
         # NOTE: This is logged in the executor because there can be >1 worker
@@ -128,8 +123,17 @@ class GPUExecutor(ExecutorBase):
         logger.info("# GPU blocks: %d, # CPU blocks: %d", num_gpu_blocks,
                     num_cpu_blocks)
 
-        self.driver_worker.initialize_cache(num_gpu_blocks, num_cpu_blocks,
-                                            kv_cache_config)
+        self.driver_worker.initialize_cache(num_gpu_blocks, num_cpu_blocks)
+
+    def get_available_memory(self) -> Tuple[int, int]:
+        return self.driver_worker.get_available_memory()
+
+    def initialize_cache_from_kv_cache_config(
+            self, kv_cache_config: KVCacheConfig) -> None:
+        """Initialize the KV cache by invoking the underlying worker.
+        """
+        self.driver_worker.initialize_cache_from_kv_cache_config(
+            kv_cache_config)
 
     def execute_model(
         self, execute_model_req: ExecuteModelRequest

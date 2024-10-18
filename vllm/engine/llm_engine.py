@@ -349,8 +349,7 @@ class LLMEngine:
         custom_block_manager = self.get_custom_block_manager()
 
         if not self.model_config.embedding_mode:
-            self._initialize_kv_caches(custom_block_manager.kv_cache_config
-                                       if custom_block_manager else None)
+            self._initialize_kv_caches(custom_block_manager)
 
         # If usage stat is enabled, collect relevant info.
         if is_usage_stats_enabled():
@@ -483,29 +482,36 @@ class LLMEngine:
             ))
 
     def _initialize_kv_caches(
-            self, kv_cache_config: Optional[KVCacheConfig]) -> None:
+            self, custom_block_manager: Optional[CustomBlockManager]) -> None:
         """Initialize the KV cache in the worker(s).
 
         The workers will determine the number of blocks in both the GPU cache
         and the swap CPU cache.
         """
-        num_gpu_blocks, num_cpu_blocks = (
-            self.model_executor.determine_num_available_blocks(
-                kv_cache_config=kv_cache_config))
+        if custom_block_manager is not None:
+            available_gpu_memory, available_cpu_memory = self.model_executor.get_available_memory(
+            )
+            custom_block_manager.compile(available_cpu_memory,
+                                         available_gpu_memory)
+            self.model_executor.initialize_cache(
+                custom_block_manager.kv_cache_config)
+        else:
+            num_gpu_blocks, num_cpu_blocks = (
+                self.model_executor.determine_num_available_blocks())
 
-        if self.cache_config.num_gpu_blocks_override is not None:
-            num_gpu_blocks_override = self.cache_config.num_gpu_blocks_override
-            logger.info(
-                "Overriding num_gpu_blocks=%d with "
-                "num_gpu_blocks_override=%d", num_gpu_blocks,
-                num_gpu_blocks_override)
-            num_gpu_blocks = num_gpu_blocks_override
+            if self.cache_config.num_gpu_blocks_override is not None:
+                num_gpu_blocks_override = self.cache_config.num_gpu_blocks_override
+                logger.info(
+                    "Overriding num_gpu_blocks=%d with "
+                    "num_gpu_blocks_override=%d", num_gpu_blocks,
+                    num_gpu_blocks_override)
+                num_gpu_blocks = num_gpu_blocks_override
 
-        self.cache_config.num_gpu_blocks = num_gpu_blocks
-        self.cache_config.num_cpu_blocks = num_cpu_blocks
+            self.cache_config.num_gpu_blocks = num_gpu_blocks
+            self.cache_config.num_cpu_blocks = num_cpu_blocks
 
-        self.model_executor.initialize_cache(num_gpu_blocks, num_cpu_blocks,
-                                             kv_cache_config)
+            self.model_executor.initialize_cache(num_gpu_blocks,
+                                                 num_cpu_blocks)
 
     @classmethod
     def _get_executor_cls(cls,
@@ -1955,8 +1961,15 @@ class LLMEngine:
         if self.scheduler_config.use_per_layer_block_manager:
             block_manager = CustomBlockManager(self.parallel_config,
                                                self.cache_config)
-            block_manager.add_block_managers_of_model(self.model_config)
-            block_manager.compile()
+            if self.speculative_config is None:
+                block_manager.add_block_managers_of_model(
+                    self.model_config, self.parallel_config)
+            else:
+                block_manager.add_block_managers_of_model(
+                    self.speculative_config.draft_model_config,
+                    self.speculative_config.draft_parallel_config, 'd.')
+                block_manager.add_block_managers_of_model(
+                    self.model_config, self.parallel_config, 'm.')
             return block_manager
         else:
             return None

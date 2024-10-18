@@ -353,8 +353,7 @@ class SpecDecodeWorker(LoraNotSupportedWorkerBase):
         self.proposer_worker.set_include_gpu_probs_tensor()
         self.proposer_worker.set_should_modify_greedy_probs_inplace()
 
-    def determine_num_available_blocks(
-            self, kv_cache_config: Optional[KVCacheConfig]) -> Tuple[int, int]:
+    def determine_num_available_blocks(self) -> Tuple[int, int]:
         """Determine the number of cache blocks to use.
 
         This is done by profiling the scorer model (which is typically the
@@ -362,11 +361,9 @@ class SpecDecodeWorker(LoraNotSupportedWorkerBase):
         scorer cache is divided evenly between the proposer and scorer model KV,
         such that the number of blocks is equal in both KV caches.
         """
-        if kv_cache_config is not None:
-            raise NotImplementedError("custom kv cache config not supported")
 
         num_gpu_blocks, num_cpu_blocks = (
-            self.scorer_worker.determine_num_available_blocks(kv_cache_config))
+            self.scorer_worker.determine_num_available_blocks())
 
         scorer_cache_block_size_bytes = (
             self.scorer_worker.get_cache_block_size_bytes())
@@ -378,16 +375,17 @@ class SpecDecodeWorker(LoraNotSupportedWorkerBase):
             num_gpu_blocks)
         return new_num_gpu_blocks, num_cpu_blocks
 
-    def initialize_cache(self, num_gpu_blocks: int, num_cpu_blocks: int,
-                         kv_cache_config: Optional[KVCacheConfig]) -> None:
+    def get_available_memory(self) -> Tuple[int, int]:
+        return self.scorer_worker.get_available_memory()
+
+    def initialize_cache(self, num_gpu_blocks: int,
+                         num_cpu_blocks: int) -> None:
         """Initialize the cache engine of the scorer and proposer workers.
         """
         self.scorer_worker.initialize_cache(num_gpu_blocks=num_gpu_blocks,
-                                            num_cpu_blocks=num_cpu_blocks,
-                                            kv_cache_config=kv_cache_config)
+                                            num_cpu_blocks=num_cpu_blocks)
         self.proposer_worker.initialize_cache(num_gpu_blocks=num_gpu_blocks,
-                                              num_cpu_blocks=num_cpu_blocks,
-                                              kv_cache_config=kv_cache_config)
+                                              num_cpu_blocks=num_cpu_blocks)
 
     @torch.inference_mode()
     def execute_model(
@@ -470,8 +468,8 @@ class SpecDecodeWorker(LoraNotSupportedWorkerBase):
             self, execute_model_req: ExecuteModelRequest) -> bool:
         # When the batch size is too large, disable speculative decoding
         # to stop trading off throughput for latency.
-        return (execute_model_req.running_queue_size >=
-                self.disable_by_batch_size)
+        return (execute_model_req.running_queue_size
+                >= self.disable_by_batch_size)
 
     def _maybe_disable_speculative_tokens(
             self, disable_all_speculation: bool,
