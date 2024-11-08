@@ -1361,6 +1361,7 @@ class SpeculativeConfig:
                 max_seq_len_to_capture=target_model_config.
                 max_seq_len_to_capture,
                 max_logprobs=target_model_config.max_logprobs,
+                mm_processor_kwargs=target_model_config.mm_processor_kwargs,
             )
 
             draft_hf_config = draft_model_config.hf_config
