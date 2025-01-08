@@ -158,6 +158,8 @@ def test_engine_core_advanced_sampling(monkeypatch):
         print("allocated", total_allocated_bytes / (2**30), 'GB', "free",
               torch.cuda.mem_get_info()[0] / (2**30), 'GB', "total",
               torch.cuda.mem_get_info()[1] / (2**30), 'GB')
+        import gc
+        gc.collect()
         """Setup the EngineCore."""
         engine_args = EngineArgs(model=MODEL_NAME)
         vllm_config = engine_args.create_engine_config()
