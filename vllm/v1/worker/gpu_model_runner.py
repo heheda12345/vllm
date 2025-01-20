@@ -1016,9 +1016,12 @@ class GPUModelRunner:
                     num_blocks, layer_spec.block_size, layer_spec.num_kv_heads,
                     layer_spec.head_size)
                 dtype = layer_spec.dtype
-                kv_caches[layer_name] = torch.zeros(kv_cache_shape,
-                                                    dtype=dtype,
-                                                    device=self.device)
+                kv_caches[layer_name] = (torch.zeros(kv_cache_shape,
+                                                     dtype=dtype,
+                                                     device=self.device),
+                                         torch.zeros(kv_cache_shape,
+                                                     dtype=dtype,
+                                                     device=self.device))
             else:
                 raise NotImplementedError
 
