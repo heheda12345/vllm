@@ -58,6 +58,40 @@ def test_can_allocate_seq_group(block_size: int, num_seqs_per_group: int,
 
 
 @pytest.mark.parametrize("block_size", [16])
+@pytest.mark.parametrize("num_gpu_blocks", [8, 40, 80])
+@pytest.mark.parametrize("num_seqs_per_group", [1, 4])
+@pytest.mark.parametrize("watermark", [0.0, 0.5])
+def test_allocate_sliding_window(block_size: int, num_seqs_per_group: int,
+                                 num_gpu_blocks: int, watermark: float):
+    block_manager = SelfAttnBlockSpaceManager(
+        block_size=block_size,
+        num_gpu_blocks=num_gpu_blocks,
+        num_cpu_blocks=1024,
+        watermark=watermark,
+        sliding_window=200,  # 12.5 blocks
+    )
+
+    num_output_blocks_per_seq = 1
+
+    # not enough blocks for full attention, but enough for sliding window when num_gpu_blocks >= 12.5
+    num_prompt_blocks = num_gpu_blocks + 10
+
+    seq_group = create_seq_group(seq_prompt_len=block_size * num_prompt_blocks,
+                                 seq_output_lens=[
+                                     block_size * num_output_blocks_per_seq
+                                     for _ in range(num_seqs_per_group)
+                                 ],
+                                 request_id=str(num_prompt_blocks),
+                                 seq_id_start=num_prompt_blocks)
+
+    can_allocate_result = block_manager.can_allocate(seq_group)
+
+    if can_allocate_result == AllocStatus.OK:
+        block_manager.allocate(seq_group)
+        block_manager.free(seq_group.seqs[0])
+
+
+@pytest.mark.parametrize("block_size", [16])
 @pytest.mark.parametrize("num_gpu_blocks", [16, 80, 160])
 @pytest.mark.parametrize("num_seqs_per_group", [1, 4])
 @pytest.mark.parametrize("watermark", [0.0, 0.5])
