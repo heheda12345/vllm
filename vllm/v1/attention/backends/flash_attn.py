@@ -316,7 +316,7 @@ class FlashAttentionMetadataBuilder:
                     max_seqlen_k=max_seq_len,
                     cache_seqlens=seqlens,
                     num_heads_q=self.num_heads_q,
-                    num_heads_kv=self.num_heads_kv,
+                    num_heads_kv=self.num_heads_q,
                     headdim=self.headdim,
                     page_size=self.page_size,
                     cu_seqlens_q=cu_query_lens,
