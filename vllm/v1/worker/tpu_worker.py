@@ -1,4 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
+# type: ignore
 """A TPU worker class."""
 import os
 from typing import Optional
