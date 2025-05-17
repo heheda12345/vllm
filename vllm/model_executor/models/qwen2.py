@@ -59,6 +59,25 @@ from .utils import (AutoWeightsLoader, PPMissingLayer, WeightsMapper,
 
 logger = init_logger(__name__)
 
+save_prefix = ""
+do_save_tensor = False
+
+
+def enable_save_tensor(prefix):
+    print("enable_save_tensor", prefix)
+    global do_save_tensor
+    global save_prefix
+    do_save_tensor = True
+    save_prefix = prefix
+
+
+def save_tensor(tensor, path):
+    if not do_save_tensor:
+        return
+    real_path = f"{save_prefix}.{path}.pt"
+    print(f"Saving {real_path}")
+    torch.save(tensor, real_path)
+
 
 class Qwen2MLP(nn.Module):
 
@@ -239,6 +258,7 @@ class Qwen2DecoderLayer(nn.Module):
                                        eps=config.rms_norm_eps)
         self.post_attention_layernorm = RMSNorm(config.hidden_size,
                                                 eps=config.rms_norm_eps)
+        self.prefix = prefix
 
     def forward(
         self,
@@ -257,11 +277,13 @@ class Qwen2DecoderLayer(nn.Module):
             positions=positions,
             hidden_states=hidden_states,
         )
-
+        save_tensor(hidden_states, f"{self.prefix}.self_attn")
         # Fully Connected
         hidden_states, residual = self.post_attention_layernorm(
             hidden_states, residual)
+        save_tensor(hidden_states, f"{self.prefix}.post_attention_layernorm")
         hidden_states = self.mlp(hidden_states)
+        save_tensor(hidden_states, f"{self.prefix}.mlp")
         return hidden_states, residual
 
 

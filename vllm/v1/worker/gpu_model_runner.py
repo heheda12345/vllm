@@ -1057,6 +1057,14 @@ class GPUModelRunner(LoRAModelRunnerMixin):
         scheduler_output: "SchedulerOutput",
         intermediate_tensors: Optional[IntermediateTensors] = None,
     ) -> Union[ModelRunnerOutput, IntermediateTensors]:
+        import os
+
+        from vllm.model_executor.models.qwen2 import enable_save_tensor
+        os.makedirs("saved_tensors", exist_ok=True)
+        if self.cache_config.cpu_offload_gb > 0:
+            enable_save_tensor("saved_tensors/cpu_offload")
+        else:
+            enable_save_tensor("saved_tensors/no_offload")
 
         self._update_states(scheduler_output)
         if not scheduler_output.total_num_scheduled_tokens:

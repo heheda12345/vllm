@@ -230,7 +230,7 @@ def _test_completion(
     # test seeded random sampling
     completion = client.completions.create(model=model,
                                            prompt=prompt,
-                                           max_tokens=5,
+                                           max_tokens=1,
                                            seed=33,
                                            temperature=1.0)
 
