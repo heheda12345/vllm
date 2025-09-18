@@ -20,6 +20,10 @@ infiles += [
     "vllm/core/scheduler.py",
     "vllm/sequence.py",
     "vllm/core/block_manager.py",
+    "vllm/v1/core/_kv_cache_manager.pyx",
+    "vllm/v1/core/_block_pool.pyx",
+    "vllm/v1/core/_single_type_kv_cache_manager.pyx",
+    "vllm/v1/core/_kv_cache_coordinator.pyx",
 ]
 
 infiles += [

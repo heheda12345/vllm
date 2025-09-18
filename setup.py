@@ -281,6 +281,30 @@ class cmake_build_ext(build_ext):
             self.copy_file(file, dst_file)
 
 
+class hybrid_build_ext(cmake_build_ext):
+    """Build both cmake-driven and standard setuptools extensions."""
+
+    def build_extensions(self) -> None:
+        original_extensions = list(self.extensions)
+        cmake_exts = [
+            ext for ext in original_extensions if isinstance(ext, CMakeExtension)
+        ]
+        other_exts = [
+            ext for ext in original_extensions
+            if not isinstance(ext, CMakeExtension)
+        ]
+
+        if cmake_exts:
+            self.extensions = cmake_exts
+            super().build_extensions()
+
+        if other_exts:
+            self.extensions = other_exts
+            build_ext.build_extensions(self)
+
+        self.extensions = original_extensions
+
+
 class precompiled_build_ext(build_ext):
     """Disables extension building when using precompiled binaries."""
 
@@ -594,6 +618,37 @@ if _is_cuda():
 if _build_custom_ops():
     ext_modules.append(CMakeExtension(name="vllm._C"))
 
+cython_ext_modules = []
+if not envs.VLLM_USE_PRECOMPILED and not _no_device():
+    try:
+        from Cython.Build import cythonize
+    except ImportError:
+        logger.info(
+            "Cython is not installed; falling back to the Python KV cache manager.")
+    else:
+        cython_directives = {
+            "language_level": 3,
+            "boundscheck": False,
+            "wraparound": False,
+            "cdivision": True,
+        }
+        cython_modules = [
+            ("vllm.v1.core._kv_cache_manager",
+             "vllm/v1/core/_kv_cache_manager.pyx"),
+            ("vllm.v1.core._block_pool",
+             "vllm/v1/core/_block_pool.pyx"),
+            ("vllm.v1.core._single_type_kv_cache_manager",
+             "vllm/v1/core/_single_type_kv_cache_manager.pyx"),
+            ("vllm.v1.core._kv_cache_coordinator",
+             "vllm/v1/core/_kv_cache_coordinator.pyx"),
+        ]
+        cython_ext_modules = cythonize(
+            [Extension(name, [path]) for name, path in cython_modules],
+            annotate=False,
+            compiler_directives=cython_directives,
+        )
+        ext_modules.extend(cython_ext_modules)
+
 package_data = {
     "vllm": [
         "py.typed",
@@ -640,10 +695,17 @@ if _no_device():
 if not ext_modules:
     cmdclass = {}
 else:
-    cmdclass = {
-        "build_ext":
-        precompiled_build_ext if envs.VLLM_USE_PRECOMPILED else cmake_build_ext
-    }
+    has_cmake_ext = any(isinstance(ext, CMakeExtension) for ext in ext_modules)
+    has_standard_ext = any(not isinstance(ext, CMakeExtension)
+                           for ext in ext_modules)
+    if envs.VLLM_USE_PRECOMPILED:
+        cmdclass = {"build_ext": precompiled_build_ext}
+    elif has_cmake_ext and has_standard_ext:
+        cmdclass = {"build_ext": hybrid_build_ext}
+    elif has_cmake_ext:
+        cmdclass = {"build_ext": cmake_build_ext}
+    else:
+        cmdclass = {"build_ext": build_ext}
 
 setup(
     # static metadata should rather go in pyproject.toml
